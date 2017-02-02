@@ -1,5 +1,6 @@
 import os
 import logging
+import numpy as np
 
 def matplotlib_setup():
     import matplotlib
@@ -24,4 +25,14 @@ def plot_image(image_data):
     # plt.show()
 
     tiff.imshow(image_data)
+    plt.show()
+
+def plot_mask(mask_data):
+    """Adopted from https://www.kaggle.com/lopuhin/dstl-satellite-imagery-feature-detection/full-pipeline-demo-poly-pixels-ml-poly"""
+    import matplotlib.pyplot as plt
+    import tifffile as tiff
+
+    mask_plot_data = 255 * np.stack([mask_data, mask_data, mask_data])
+
+    tiff.imshow(mask_plot_data)
     plt.show()

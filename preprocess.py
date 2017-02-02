@@ -1,6 +1,7 @@
 import os
 import logging
 import csv
+import pickle
 
 import numpy as np
 
@@ -9,11 +10,13 @@ import shapely.wkt
 import shapely.affinity
 
 from utils.data import load_grid_sizes, load_polygons, load_images
-from utils.matplotlib import matplotlib_setup, plot_image
-from config import DATA_DIR, GRID_SIZES_FILENAME, POLYGONS_FILENAME, IMAGES_DIR, DEBUG, DEBUG_IMAGE
+from utils.matplotlib import matplotlib_setup, plot_image, plot_mask
+from config import DATA_DIR, GRID_SIZES_FILENAME, POLYGONS_FILENAME, IMAGES_DIR, DEBUG, DEBUG_IMAGE, \
+    IMAGES_METADATA_MASKS_FILENAME
+from utils.polygon import create_mask_from_metadata
 
 
-def generate_images_metadata(grid_sizes, images, polygons):
+def create_images_metadata(grid_sizes, images, polygons):
     image_ids = sorted(images.keys())
     image_ids_set = set(image_ids)
 
@@ -56,64 +59,36 @@ def generate_images_metadata(grid_sizes, images, polygons):
 
         images_metadata.append(image_md)
 
+    logging.info('Metadata: %s', len(images_metadata))
+
     return images_metadata
 
-def plot_polygons(image, image_metadata):
-    import matplotlib.pyplot as plt
-    import matplotlib
-    from matplotlib.path import Path
-    import matplotlib.patches as patches
-    from matplotlib.collections import PatchCollection
 
-    # http://matplotlib.org/users/path_tutorial.html
-    # http://matplotlib.org/examples/api/patch_collection.html
+def create_classes_masks(images_metadata):
+    masks = {}
 
-    # def create_plt_patch(im, coords):
-    #     patch = np.array(coords)
-    #     patch[:, 0] /= im['height']
-    #     patch[:, 1] /= im['width']
-    #     plt_poly = Polygon(patch, True)
-    #
-    #     return plt_poly
+    for im in images_metadata:
+        image_id = im['image_id']
+        if image_id not in masks:
+            masks[image_id] = {}
 
-    int_coords = lambda x: np.array(x).round().astype(np.int32)
+        mask = create_mask_from_metadata(im)
+        class_type = im['class_type']
 
-    taget_type = 1
+        masks[image_id][class_type] = mask
 
-    image_metadata = [im for im in image_metadata if im['class_type'] == taget_type]
+    logging.info('Masks: %s', len(masks))
 
-    # create polygons
-    plt_polygons = []
-    plt_colors = []
-    for im in image_metadata:
-        multipoly = shapely.wkt.loads(im['ploy_scaled'])
+    return masks
 
-        exteriors = [int_coords(poly.exterior.coords) for poly in multipoly]
-        interiors = [int_coords(pi.coords) for poly in multipoly for pi in poly.interiors]
-        for poly in exteriors:
-            plt_poly = patches.Polygon(poly, closed=True)
-            plt_polygons.append(plt_poly)
-            plt_colors.append('black')
+def save_data(filename, images, images_metadata, images_masks):
+    data_list = [images, images_metadata, images_masks]
 
-        for poly in interiors:
-            plt_poly = patches.Polygon(poly, closed=True)
-            plt_polygons.append(plt_poly)
-            plt_colors.append('red')
+    with open(filename, 'wb') as f:
+        pickle.dump(data_list, f)
 
+    logging.info('Saved: %s', os.path.basename(filename))
 
-    # plt_patches = PatchCollection(plt_polygons)
-    # plt_patches.set_array(np.full((len(plt_polygons),), 1))
-    # ax.add_collection(plt_patches)
-
-    fig, ax = plt.subplots()
-    plt_patches = PatchCollection(plt_polygons, facecolors=plt_colors)
-    ax.add_collection(plt_patches)
-
-    ax.set_xlim(0, image_metadata[0]['width'])
-    ax.set_ylim(0, image_metadata[0]['height'])
-    ax.set_axis_off()
-
-    plt.show()
 
 def main():
     logging.basicConfig(
@@ -126,16 +101,17 @@ def main():
     polygons = load_polygons(POLYGONS_FILENAME)
     images = load_images(IMAGES_DIR)
 
-    images_metadata = generate_images_metadata(grid_sizes, images, polygons)
+    images_metadata = create_images_metadata(grid_sizes, images, polygons)
+    images_masks = create_classes_masks(images_metadata)
 
-    if DEBUG:
-        image = images[DEBUG_IMAGE]
-        # plot_image(image[2900:3200,2000:2300]) #
+    # if DEBUG:
+    #     image = images[DEBUG_IMAGE]
+    #     mask = images_masks[DEBUG_IMAGE][1]
+    #     plot_image(image[2900:3200,2000:2300])
+    #     plot_mask(mask[2900:3200,2000:2300])
 
-        image_metadata = [im for im in images_metadata if im['image_id'] == DEBUG_IMAGE]
-        plot_polygons(image, image_metadata)
-
-    pass
+    # save everything into a pickled file
+    save_data(IMAGES_METADATA_MASKS_FILENAME, images, images_metadata, images_masks)
 
 if __name__ == '__main__':
     main()
