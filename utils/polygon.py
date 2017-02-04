@@ -4,6 +4,9 @@ import shapely.wkt
 import shapely.affinity
 import numpy as np
 
+# https://mapbox.github.io/rasterio/api/rasterio.features.html
+# rasterio.features.rasterize()
+
 def round_coords(coords):
     return np.array(coords).round().astype(np.int32)
 

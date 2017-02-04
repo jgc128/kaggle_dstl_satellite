@@ -1,5 +1,8 @@
 import logging
+from datetime import datetime
+
 import os
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -7,6 +10,28 @@ import shapely
 import tifffile as tiff
 
 from config import DEBUG, DEBUG_IMAGE
+
+
+def load_pickle(filename):
+    data_start = datetime.now()
+
+    with open(filename, 'rb') as f:
+        data = pickle.load(f)
+
+    data_end = datetime.now()
+    logging.info('Loaded: %s in %s', os.path.basename(filename), data_end - data_start)
+
+    return data
+
+
+def save_pickle(filename, obj):
+    data_start = datetime.now()
+
+    with open(filename, 'wb') as f:
+        pickle.dump(obj, f)
+
+    data_end = datetime.now()
+    logging.info('Saved: %s in %s', os.path.basename(filename), data_end - data_start)
 
 
 def load_grid_sizes(filename):
@@ -23,16 +48,19 @@ def load_polygons(filename):
     return data
 
 
-def load_images(directory):
-    images = sorted([f[:-4] for f in os.listdir(directory)])  # :-4 to discard .tif
+def load_images(directory, target_images=None):
+    if target_images is None:
+        target_images = sorted([f[:-4] for f in os.listdir(directory)])  # :-4 to discard .tif
 
     if DEBUG:
-        images = [DEBUG_IMAGE, ]
-    logging.info('Images: %s', len(images))
+        target_images = [DEBUG_IMAGE, ]
+    logging.info('Images: %s', len(target_images))
 
-    images_filenames = [os.path.join(directory, i + '.tif') for i in images]
+    images_filenames = [os.path.join(directory, i + '.tif') for i in target_images]
 
     # transpose to get the (height, width, channels) shape
-    image_files = {image_id: tiff.imread(images_filenames[i]).transpose([1, 2, 0]) for i, image_id in enumerate(images)}
+    images_data = {image_id: tiff.imread(images_filenames[i]).transpose([1, 2, 0]) for i, image_id in
+                   enumerate(target_images)}
 
-    return image_files
+    logging.info('Images data: %s', len(images_data))
+    return images_data

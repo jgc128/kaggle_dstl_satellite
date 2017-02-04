@@ -2,7 +2,6 @@ import os
 
 DEBUG = True
 # DEBUG = False
-
 DEBUG_IMAGE = '6120_2_2'
 
 DATA_DIR = './data/'
@@ -15,3 +14,5 @@ IMAGES_DIR = os.path.join(DATA_DIR, 'three_band/')
 PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'processed/')
 
 IMAGES_METADATA_MASKS_FILENAME = os.path.join(DATA_DIR, 'images_metadata_masks.pkl')
+
+MODELS_DIR = os.path.join(DATA_DIR, 'models/')

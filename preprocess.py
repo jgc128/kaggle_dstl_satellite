@@ -9,15 +9,15 @@ import shapely
 import shapely.wkt
 import shapely.affinity
 
-from utils.data import load_grid_sizes, load_polygons, load_images
+from utils.data import load_grid_sizes, load_polygons, load_images, save_pickle
 from utils.matplotlib import matplotlib_setup, plot_image, plot_mask
 from config import DATA_DIR, GRID_SIZES_FILENAME, POLYGONS_FILENAME, IMAGES_DIR, DEBUG, DEBUG_IMAGE, \
     IMAGES_METADATA_MASKS_FILENAME
 from utils.polygon import create_mask_from_metadata
 
 
-def create_images_metadata(grid_sizes, images, polygons):
-    image_ids = sorted(images.keys())
+def create_images_metadata(grid_sizes, images_data, polygons):
+    image_ids = sorted(images_data.keys())
     image_ids_set = set(image_ids)
 
     images_metadata = []
@@ -30,8 +30,8 @@ def create_images_metadata(grid_sizes, images, polygons):
         x_max = grid_size['x_max']
         y_min = grid_size['y_min']
 
-        width = images[image_id].shape[1]
-        height = images[image_id].shape[0]
+        width = images_data[image_id].shape[1]
+        height = images_data[image_id].shape[0]
 
         width_prime = width * (width / (width + 1))
         height_prime = height * (height / (height + 1))
@@ -81,13 +81,28 @@ def create_classes_masks(images_metadata):
 
     return masks
 
+def normalize_images(images_data):
+    nb_channels = images_data[list(images_data.keys())[0]].shape[2]
+
+    channels_mean = []
+
+    for img_id, img_data in images_data.items():
+        current_mean = np.mean(img_data, axis=(0,1))
+        channels_mean.append(current_mean)
+
+    channels_mean = np.array(channels_mean).mean(axis=0)
+
+    images_data_normalized = {}
+    for img_id, img_data in images_data.items():
+        images_data_normalized[img_id] = img_data - channels_mean
+
+    return images_data_normalized, channels_mean
+
+
 def save_data(filename, images, images_metadata, images_masks):
     data_list = [images, images_metadata, images_masks]
 
-    with open(filename, 'wb') as f:
-        pickle.dump(data_list, f)
-
-    logging.info('Saved: %s', os.path.basename(filename))
+    save_pickle(filename, data_list)
 
 
 def main():
@@ -99,19 +114,27 @@ def main():
 
     grid_sizes = load_grid_sizes(GRID_SIZES_FILENAME)
     polygons = load_polygons(POLYGONS_FILENAME)
-    images = load_images(IMAGES_DIR)
 
-    images_metadata = create_images_metadata(grid_sizes, images, polygons)
+    train_images = sorted(polygons.index)
+    images_data = load_images(IMAGES_DIR, target_images=train_images)
+
+
+    images_metadata = create_images_metadata(grid_sizes, images_data, polygons)
     images_masks = create_classes_masks(images_metadata)
 
-    # if DEBUG:
-    #     image = images[DEBUG_IMAGE]
-    #     mask = images_masks[DEBUG_IMAGE][1]
-    #     plot_image(image[2900:3200,2000:2300])
-    #     plot_mask(mask[2900:3200,2000:2300])
+    images_data_normalized, channels_mean = normalize_images(images_data)
+
+    if DEBUG:
+        img = images_data[DEBUG_IMAGE]
+        img_normalized = images_data_normalized[DEBUG_IMAGE]
+        mask = images_masks[DEBUG_IMAGE][1]
+        plot_image(img[2900:3200,2000:2300])
+        plot_image(img_normalized[2900:3200,2000:2300])
+        plot_mask(mask[2900:3200,2000:2300])
 
     # save everything into a pickled file
-    save_data(IMAGES_METADATA_MASKS_FILENAME, images, images_metadata, images_masks)
+    save_data(IMAGES_METADATA_MASKS_FILENAME, images_data_normalized, images_metadata, images_masks, channels_mean)
+
 
 if __name__ == '__main__':
     main()
