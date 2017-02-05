@@ -99,11 +99,6 @@ def normalize_images(images_data):
     return images_data_normalized, channels_mean
 
 
-def save_data(filename, images, images_metadata, images_masks):
-    data_list = [images, images_metadata, images_masks]
-
-    save_pickle(filename, data_list)
-
 
 def main():
     logging.basicConfig(
@@ -128,12 +123,16 @@ def main():
         img = images_data[DEBUG_IMAGE]
         img_normalized = images_data_normalized[DEBUG_IMAGE]
         mask = images_masks[DEBUG_IMAGE][1]
-        plot_image(img[2900:3200,2000:2300])
-        plot_image(img_normalized[2900:3200,2000:2300])
-        plot_mask(mask[2900:3200,2000:2300])
+        # plot_image(img[2900:3200,2000:2300])
+        # plot_image(img_normalized[2900:3200,2000:2300])
+        # plot_mask(mask[2900:3200,2000:2300])
+        plot_image(img)
+        plot_image(img_normalized)
+        plot_mask(mask)
 
     # save everything into a pickled file
-    save_data(IMAGES_METADATA_MASKS_FILENAME, images_data_normalized, images_metadata, images_masks, channels_mean)
+    save_pickle(IMAGES_METADATA_MASKS_FILENAME, [images_data_normalized, images_metadata, images_masks, channels_mean])
+
 
 
 if __name__ == '__main__':

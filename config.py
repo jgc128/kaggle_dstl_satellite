@@ -1,7 +1,7 @@
 import os
 
-DEBUG = True
-# DEBUG = False
+# DEBUG = True
+DEBUG = False
 DEBUG_IMAGE = '6120_2_2'
 
 DATA_DIR = './data/'
