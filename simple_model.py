@@ -10,8 +10,8 @@ from tensorflow_helpers.models.base_model import BaseModel
 
 from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle
 from utils.matplotlib import matplotlib_setup, plot_mask, plot_image, plot_test_predictions
-from config import DATA_DIR, GRID_SIZES_FILENAME, POLYGONS_FILENAME, IMAGES_DIR, IMAGES_METADATA_MASKS_FILENAME, \
-    DEBUG_IMAGE
+from config import DATA_DIR, GRID_SIZES_FILENAME, POLYGONS_FILENAME, IMAGES_THREE_BAND_DIR, IMAGES_METADATA_MASKS_FILENAME, \
+    DEBUG_IMAGE, FIGURES_DIR
 
 
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
@@ -56,7 +56,7 @@ class SimpleModel(BaseModel):
         net = slim.max_pool2d(net, [2, 2], scope='pool5_1')
 
         net = slim.conv2d(net, 4096, [1, 1], scope='conv6')
-        net = slim.conv2d(net, 4096, [1, 1], scope='conv7')
+        net = slim.conv2d(net, 1000, [1, 1], scope='conv7')
 
         # upsampling
 
@@ -90,11 +90,14 @@ class SimpleModel(BaseModel):
         net = net + pool3_scored
 
         # finally, upsample x8
-        net = slim.convolution2d_transpose(net, 1, [32, 32], stride=8, scope='upsamle_3')
+        net = slim.convolution2d_transpose(net, 1, [16, 16], stride=8, scope='upsamle_3')
 
-        # input_shape = input.get_shape()
-        # logits = tf.reshape(net, (-1, int(input_shape[1]), int(input_shape[2]),))
-        logits = tf.reshape(net, (-1, input_shape[1], input_shape[2],))
+        ########
+        # Logits
+
+        input_shape = input.get_shape()
+        logits = tf.reshape(net, (-1, int(input_shape[1]), int(input_shape[2]),))
+        # logits = tf.reshape(net, (-1, input_shape[1], input_shape[2],))
 
         with tf.name_scope('prediction'):
             predict = tf.nn.sigmoid(logits)
@@ -104,7 +107,10 @@ class SimpleModel(BaseModel):
         with tf.name_scope('loss'):
             targets = self.input_dict['Y']
 
-            cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits, targets)
+            logits_reshaped = tf.reshape(logits, (-1, 1))
+            targets_reshaped = tf.reshape(targets, (-1, 1))
+
+            cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits_reshaped, targets_reshaped)
 
             loss = tf.reduce_mean(cross_entropy)
 
@@ -119,10 +125,11 @@ def main():
 
     import matplotlib.pyplot as plt
 
-    images_data, images_metadata, images_masks, channels_mean = load_pickle(IMAGES_METADATA_MASKS_FILENAME)
+    images_data, images_metadata, images_masks, channels_mean, channels_std = load_pickle(IMAGES_METADATA_MASKS_FILENAME)
     logging.info('Images: %s, metadata: %s, masks: %s', len(images_data), len(images_metadata), len(images_masks))
 
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
+    sess_config.gpu_options.allow_growth = True
     sess = tf.Session(config=sess_config)
 
     model_params = {
@@ -131,6 +138,7 @@ def main():
     model = SimpleModel(**model_params)
     model.set_session(sess)
 
+    # TODO: not a fixed size
     # model.add_input('X', [None, None, 3])
     # model.add_input('Y', [None, None])
 
@@ -145,58 +153,61 @@ def main():
 
     # train model
 
-    nb_epoch = 1
-    batch_size = 32
+    nb_epoch = 10
+    batch_size = 40
     images = np.array([img_id for img_id in images_data.keys() if images_masks[img_id][target_class].sum() > 0])
     X = None
     Y = None
+    i = 0
     for i in range(nb_epoch):
-        # sample random patches from images
-        train_patches = []
-        train_mask = []
+        try:
+            # sample random patches from images
+            train_patches = []
+            train_mask = []
 
-        while len(train_patches) <= batch_size:
-            img_id = np.random.choice(images)
+            while len(train_patches) <= batch_size:
+                img_id = np.random.choice(images)
 
-            img_data = images_data[img_id]
-            img_mask_data = images_masks[img_id][target_class]
+                img_data = images_data[img_id]
+                img_mask_data = images_masks[img_id][target_class]
 
-            img_height = img_data.shape[0]
-            img_width = img_data.shape[1]
+                img_height = img_data.shape[0]
+                img_width = img_data.shape[1]
 
-            img_random_c1 = (np.random.randint(0, img_height - patch_size[0]), np.random.randint(0, img_width - patch_size[1]))
-            img_random_c2 = (img_random_c1[0] + patch_size[0], img_random_c1[1] + patch_size[1])
+                img_random_c1 = (np.random.randint(0, img_height - patch_size[0]), np.random.randint(0, img_width - patch_size[1]))
+                img_random_c2 = (img_random_c1[0] + patch_size[0], img_random_c1[1] + patch_size[1])
 
-            img_patch = img_data[img_random_c1[0]:img_random_c2[0],img_random_c1[1]:img_random_c2[1],:]
-            img_mask = img_mask_data[img_random_c1[0]:img_random_c2[0],img_random_c1[1]:img_random_c2[1]]
+                img_patch = img_data[img_random_c1[0]:img_random_c2[0],img_random_c1[1]:img_random_c2[1],:]
+                img_mask = img_mask_data[img_random_c1[0]:img_random_c2[0],img_random_c1[1]:img_random_c2[1]]
 
-            # add only samples with some amount of target class
-            mask_fraction = img_mask.sum() / (patch_size[0] * patch_size[1])
-            if mask_fraction >= 0.1:
-                train_patches.append(img_patch)
-                train_mask.append(img_mask)
+                # add only samples with some amount of target class
+                mask_fraction = img_mask.sum() / (patch_size[0] * patch_size[1])
+                if mask_fraction >= 0.1:
+                    train_patches.append(img_patch)
+                    train_mask.append(img_mask)
 
-        X = np.array(train_patches)
-        Y = np.array(train_mask)
+            X = np.array(train_patches)
+            Y = np.array(train_mask)
 
-        data_dict_train = {'X': X, 'Y': Y}
-        model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
+            data_dict_train = {'X': X, 'Y': Y}
+            model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
+        except KeyboardInterrupt:
+            break
 
+    # plot sample predictions
+    nb_test_images = 3
 
-        # plot sample predictions
-        if i % 10 == 0:
-            nb_test_images = 3
+    X_test = X[:nb_test_images]
+    Y_true = Y[:nb_test_images]
+    data_dict_test = {'X': X_test}
+    Y_pred = model.predict(data_dict_test)
+    Y_pred = np.array(Y_pred)
+    Y_pred[Y_pred <= 0.5] = 0
+    Y_pred[Y_pred > 0.5] = 1
 
-            X_test = X[:nb_test_images]
-            Y_true = Y[:nb_test_images]
-            data_dict_test = {'X': X_test}
-            Y_pred = model.predict(data_dict_test)
-            Y_pred = np.array(Y_pred)
-            Y_pred[Y_pred < 0.5] = 0
-            Y_pred[Y_pred >= 0.5] = 1
-
-            title = 'Epoch {}'.format(i)
-            plot_test_predictions(X_test, Y_true, Y_pred, channels_mean, title=title)
+    title = 'Epoch {}'.format(i)
+    filename = os.path.join(FIGURES_DIR, 'test.png')
+    plot_test_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std, title=title, filename=filename, show=True)
 
 
 if __name__ == '__main__':

@@ -11,7 +11,7 @@ import shapely.affinity
 
 from utils.data import load_grid_sizes, load_polygons, load_images, save_pickle
 from utils.matplotlib import matplotlib_setup, plot_image, plot_mask
-from config import DATA_DIR, GRID_SIZES_FILENAME, POLYGONS_FILENAME, IMAGES_DIR, DEBUG, DEBUG_IMAGE, \
+from config import DATA_DIR, GRID_SIZES_FILENAME, POLYGONS_FILENAME, IMAGES_THREE_BAND_DIR, DEBUG, DEBUG_IMAGE, \
     IMAGES_METADATA_MASKS_FILENAME
 from utils.polygon import create_mask_from_metadata
 
@@ -84,19 +84,22 @@ def create_classes_masks(images_metadata):
 def normalize_images(images_data):
     nb_channels = images_data[list(images_data.keys())[0]].shape[2]
 
-    channels_mean = []
-
+    channel_data = [[] for i in range(nb_channels)]
     for img_id, img_data in images_data.items():
-        current_mean = np.mean(img_data, axis=(0,1))
-        channels_mean.append(current_mean)
+        for i in range(nb_channels):
+            img_channel_data = img_data[:,:,i].flatten()
+            channel_data[i].append(img_channel_data)
 
-    channels_mean = np.array(channels_mean).mean(axis=0)
+    channel_data = np.array([np.concatenate(chds, axis=0) for chds in channel_data])
+
+    channels_mean = channel_data.mean(axis=1)
+    channels_std = channel_data.std(axis=1)
 
     images_data_normalized = {}
     for img_id, img_data in images_data.items():
-        images_data_normalized[img_id] = img_data - channels_mean
+        images_data_normalized[img_id] = (img_data - channels_mean) / channels_std
 
-    return images_data_normalized, channels_mean
+    return images_data_normalized, channels_mean, channels_std
 
 
 
@@ -111,13 +114,13 @@ def main():
     polygons = load_polygons(POLYGONS_FILENAME)
 
     train_images = sorted(polygons.index)
-    images_data = load_images(IMAGES_DIR, target_images=train_images)
+    images_data = load_images(IMAGES_THREE_BAND_DIR, target_images=train_images)
 
 
     images_metadata = create_images_metadata(grid_sizes, images_data, polygons)
     images_masks = create_classes_masks(images_metadata)
 
-    images_data_normalized, channels_mean = normalize_images(images_data)
+    images_data_normalized, channels_mean, channels_std = normalize_images(images_data)
 
     if DEBUG:
         img = images_data[DEBUG_IMAGE]
@@ -131,7 +134,8 @@ def main():
         plot_mask(mask)
 
     # save everything into a pickled file
-    save_pickle(IMAGES_METADATA_MASKS_FILENAME, [images_data_normalized, images_metadata, images_masks, channels_mean])
+    save_pickle(IMAGES_METADATA_MASKS_FILENAME,
+                [images_data_normalized, images_metadata, images_masks, channels_mean, channels_std])
 
 
 
