@@ -11,7 +11,7 @@ from tensorflow_helpers.models.base_model import BaseModel
 from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle
 from utils.matplotlib import matplotlib_setup, plot_mask, plot_image, plot_test_predictions
 from config import DATA_DIR, GRID_SIZES_FILENAME, POLYGONS_FILENAME, IMAGES_THREE_BAND_DIR, IMAGES_METADATA_MASKS_FILENAME, \
-    DEBUG_IMAGE, FIGURES_DIR
+    DEBUG_IMAGE, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR
 
 
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
@@ -80,41 +80,58 @@ class SimpleModel(BaseModel):
         # FCN-8s
 
         # first, upsample x2 and add scored pool4
-        net = slim.convolution2d_transpose(net, 1, [4, 4], stride=2, scope='upsamle_1')
-        pool4_scored = slim.conv2d(pool4, 1, [1, 1], scope='pool4_scored', activation_fn=None)
+        net = slim.convolution2d_transpose(net, 512, [4, 4], stride=2, scope='upsamle_1')
+        pool4_scored = slim.conv2d(pool4, 512, [1, 1], scope='pool4_scored', activation_fn=None)
         net = net + pool4_scored
 
         # second, upsample x2 and add scored pool3
-        net = slim.convolution2d_transpose(net, 1, [4, 4], stride=2, scope='upsamle_2')
-        pool3_scored = slim.conv2d(pool3, 1, [1, 1], scope='pool3_scored', activation_fn=None)
+        net = slim.convolution2d_transpose(net, 256, [4, 4], stride=2, scope='upsamle_2')
+        pool3_scored = slim.conv2d(pool3, 256, [1, 1], scope='pool3_scored', activation_fn=None)
         net = net + pool3_scored
 
         # finally, upsample x8
-        net = slim.convolution2d_transpose(net, 1, [16, 16], stride=8, scope='upsamle_3')
+        net = slim.convolution2d_transpose(net, 2, [16, 16], stride=8, scope='upsamle_3', activation_fn=None)
 
         ########
         # Logits
 
         input_shape = input.get_shape()
-        logits = tf.reshape(net, (-1, int(input_shape[1]), int(input_shape[2]),))
+        # logits = tf.reshape(net, (-1, int(input_shape[1]), int(input_shape[2]),))
         # logits = tf.reshape(net, (-1, input_shape[1], input_shape[2],))
 
+        logits = net
+
         with tf.name_scope('prediction'):
-            predict = tf.nn.sigmoid(logits)
+            predcit_probs = tf.nn.softmax(logits)
+            predict = tf.argmax(predcit_probs, axis=3)
 
             self.op_predict = predict
 
         with tf.name_scope('loss'):
-            targets = self.input_dict['Y']
+            targets = tf.cast(self.input_dict['Y'], dtype=tf.int32)
 
-            logits_reshaped = tf.reshape(logits, (-1, 1))
-            targets_reshaped = tf.reshape(targets, (-1, 1))
+            target_one_hot = tf.one_hot(targets, 2)
 
-            cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits_reshaped, targets_reshaped)
+            cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits, target_one_hot)
+            loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1,2]))
 
-            loss = tf.reduce_mean(cross_entropy)
+            # targets = self.input_dict['Y']
+
+            # logits_reshaped = tf.reshape(logits, (-1, 1))
+            # targets_reshaped = tf.reshape(targets, (-1, 1))
+            #
+            # cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits_reshaped, targets_reshaped)
+            #
+            # loss = tf.reduce_mean(cross_entropy)
 
             self.op_loss = loss
+
+    def write_image_summary(self, name, image):
+        if self.log_writer is not None:
+            summary_op = tf.summary.image(name, tf.expand_dims(tf.constant(image, dtype=tf.float32), 0))
+            summary_res = self.sess.run(summary_op)
+            self.log_writer.add_summary(summary_res, self._global_step)
+
 
 def main():
     logging.basicConfig(
@@ -137,6 +154,7 @@ def main():
     }
     model = SimpleModel(**model_params)
     model.set_session(sess)
+    model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model'))
 
     # TODO: not a fixed size
     # model.add_input('X', [None, None, 3])
@@ -153,7 +171,7 @@ def main():
 
     # train model
 
-    nb_epoch = 10
+    nb_epoch = 5000
     batch_size = 40
     images = np.array([img_id for img_id in images_data.keys() if images_masks[img_id][target_class].sum() > 0])
     X = None
@@ -191,6 +209,31 @@ def main():
 
             data_dict_train = {'X': X, 'Y': Y}
             model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
+
+            if i % 50 == 0:
+                # plot sample predictions
+                nb_test_images = 3
+
+                X_test = X[:nb_test_images]
+                Y_true = Y[:nb_test_images]
+                data_dict_test = {'X': X_test}
+                Y_pred = model.predict(data_dict_test)
+                Y_pred = np.array(Y_pred)
+
+                # tensorboard's requirement
+                Y_pred = np.expand_dims(Y_pred, 3)
+                Y_true = np.expand_dims(Y_true, 3)
+
+                for j in range(nb_test_images):
+                    suffix = 'epoch_{}_image_{}/'.format(i,j)
+                    model.write_image_summary(suffix + 'image', X_test[j] * channels_std + channels_mean)
+                    model.write_image_summary(suffix + 'true', Y_true[j])
+                    model.write_image_summary(suffix + 'pred', Y_pred[j])
+
+                model_name = os.path.join(MODELS_DIR, 'simple_model')
+                saved_filaname = model.save_model(model_name, global_step=i)
+                logging.info('Model saved: %s', saved_filaname)
+
         except KeyboardInterrupt:
             break
 
@@ -202,12 +245,10 @@ def main():
     data_dict_test = {'X': X_test}
     Y_pred = model.predict(data_dict_test)
     Y_pred = np.array(Y_pred)
-    Y_pred[Y_pred <= 0.5] = 0
-    Y_pred[Y_pred > 0.5] = 1
 
     title = 'Epoch {}'.format(i)
     filename = os.path.join(FIGURES_DIR, 'test.png')
-    plot_test_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std, title=title, filename=filename, show=True)
+    plot_test_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std, title=title, filename=filename, show=False)
 
 
 if __name__ == '__main__':

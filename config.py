@@ -6,7 +6,6 @@ DEBUG_IMAGE = '6120_2_2'
 
 DATA_DIR = './data/'
 
-
 GRID_SIZES_FILENAME = os.path.join(DATA_DIR, 'grid_sizes.csv')
 POLYGONS_FILENAME = os.path.join(DATA_DIR, 'train_wkt_v4.csv')
 IMAGES_THREE_BAND_DIR = os.path.join(DATA_DIR, 'three_band/')
@@ -17,3 +16,4 @@ IMAGES_METADATA_MASKS_FILENAME = os.path.join(DATA_DIR, 'images_metadata_masks.p
 
 MODELS_DIR = os.path.join(DATA_DIR, 'models/')
 FIGURES_DIR = os.path.join(DATA_DIR, 'figures/')
+TENSORBOARD_DIR = os.path.join(DATA_DIR, 'tensorboard/')
