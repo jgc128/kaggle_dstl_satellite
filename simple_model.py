@@ -10,7 +10,7 @@ from tensorflow_helpers.models.base_model import BaseModel
 from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle
 from utils.matplotlib import matplotlib_setup, plot_mask, plot_image, plot_test_predictions
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR, \
-    IMAGES_METADATA_FILENAME
+    IMAGES_METADATA_FILENAME, TRAIN_PATCHES_FILENAME
 
 
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
@@ -109,14 +109,14 @@ def main():
 
     matplotlib_setup()
 
-    import matplotlib.pyplot as plt
+    # load sampled patches
+    with np.load(TRAIN_PATCHES_FILENAME) as data:
+        X = data['train_patches']
+        Y = data['train_mask']
 
-    # images_data, images_metadata, images_masks, channels_mean, channels_std = load_pickle(IMAGES_METADATA_MASKS_FILENAME)
-    # logging.info('Images: %s, metadata: %s, masks: %s', len(images_data), len(images_metadata), len(images_masks))
-    images_data = load_pickle(IMAGES_NORMALIZED_FILENAME)
-    images_masks = load_pickle(IMAGES_MASKS_FILENAME)
-    logging.info('Images: %s, masks: %s', len(images_data), len(images_masks))
+    logging.info('X: %s, Y: %s', X.shape, Y.shape)
 
+    # load images metadata
     images_metadata, channels_mean, channels_std = load_pickle(IMAGES_METADATA_FILENAME)
     logging.info('Images metadata: %s, mean: %s, std: %s',
                  len(images_metadata), channels_mean.shape, channels_std.shape)
@@ -132,9 +132,9 @@ def main():
     model.set_session(sess)
     model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model'))
 
-    patch_size = (256, 256,)
-    nb_channels = 3
-    nb_classes = 10
+    patch_size = (X.shape[1],X.shape[2],)
+    nb_channels = X.shape[3]
+    nb_classes = Y.shape[3]
 
     # TODO: not a fixed size
     model.add_input('X', [patch_size[0], patch_size[0], nb_channels])
@@ -144,69 +144,29 @@ def main():
 
     # train model
 
-    nb_epoch = 50000
+    nb_epoch = 10
     batch_size = 40
     nb_test_images = 3
-
-    X = None
-    Y = None
-    i = 0
-
-    images = np.array(list(images_data.keys()))
-    classes = np.arange(1, nb_classes+1)
+    data_dict_train = {'X': X, 'Y': Y}
     for i in range(nb_epoch):
         try:
-            # sample random patches from images
-            train_patches = []
-            train_mask = []
-
-            while len(train_patches) <= batch_size:
-                img_id = np.random.choice(images)
-
-                img_data = images_data[img_id]
-                img_mask_data = np.stack([images_masks[img_id][target_class] for target_class in classes], axis=-1)
-
-                img_height = img_data.shape[0]
-                img_width = img_data.shape[1]
-
-                img_c1 = (
-                    np.random.randint(0, img_height - patch_size[0]),
-                    np.random.randint(0, img_width - patch_size[1])
-                )
-                img_c2 = (img_c1[0] + patch_size[0], img_c1[1] + patch_size[1])
-
-                img_patch = img_data[img_c1[0]:img_c2[0], img_c1[1]:img_c2[1], :]
-                img_mask = img_mask_data[img_c1[0]:img_c2[0], img_c1[1]:img_c2[1], :]
-
-                # add only samples with some amount of target class
-                mask_fraction = img_mask.sum() / (patch_size[0] * patch_size[1])
-                if mask_fraction >= 0.1:
-                    train_patches.append(img_patch)
-                    train_mask.append(img_mask)
-
-            X = np.array(train_patches)
-            Y = np.array(train_mask)
-
-            data_dict_train = {'X': X, 'Y': Y}
             model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
 
-            if i % 50 == 0:
-                data_dict_test = {'X': X}
+            if i % 2 == 0:
+                X_test = X[:nb_test_images]
+                Y_test = Y[:nb_test_images]
+                data_dict_test = {'X': X_test}
                 Y_pred_probs = model.predict(data_dict_test)
                 Y_pred_probs = np.array(Y_pred_probs)
                 Y_pred = np.round(Y_pred_probs)
-
-
-                # tensorboard's requirement
-                # Y_pred = np.expand_dims(Y_pred, 3)
 
                 classes_to_plot = [1, 6] # Building and crops
 
                 for target_class in classes_to_plot:
                     prefix = 'epoch_{}_class_{}/'.format(i, target_class)
-                    model.write_image_summary(prefix + 'image', X * channels_std + channels_mean)
+                    model.write_image_summary(prefix + 'image', X_test * channels_std + channels_mean)
 
-                    Y_true_class = np.expand_dims(Y[:,:,:,target_class-1], 3)
+                    Y_true_class = np.expand_dims(Y_test[:,:,:,target_class-1], 3)
                     Y_pred_class = np.expand_dims(Y_pred[:,:,:,target_class-1], 3)
                     model.write_image_summary(prefix + 'true', Y_true_class)
                     model.write_image_summary(prefix + 'pred', Y_pred_class)
