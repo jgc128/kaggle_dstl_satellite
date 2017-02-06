@@ -10,10 +10,10 @@ import numpy as np
 def round_coords(coords):
     return np.array(coords).round().astype(np.int32)
 
-def create_mask_from_metadata(image_metadata):
+def create_mask_from_metadata(img_metadata, polygon_metadata):
     """Adopted from https://www.kaggle.com/lopuhin/dstl-satellite-imagery-feature-detection/full-pipeline-demo-poly-pixels-ml-poly"""
-    image_size = (image_metadata['height'], image_metadata['width'])
-    multipolygon = shapely.wkt.loads(image_metadata['ploy_scaled'])
+    image_size = (img_metadata['height'], img_metadata['width'])
+    multipolygon = shapely.wkt.loads(polygon_metadata['ploy_scaled'])
 
     image_mask = np.zeros(image_size, np.uint8)
 

@@ -5,13 +5,12 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 
-
 from tensorflow_helpers.models.base_model import BaseModel
 
 from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle
 from utils.matplotlib import matplotlib_setup, plot_mask, plot_image, plot_test_predictions
-from config import DATA_DIR, GRID_SIZES_FILENAME, POLYGONS_FILENAME, IMAGES_THREE_BAND_DIR, IMAGES_METADATA_MASKS_FILENAME, \
-    DEBUG_IMAGE, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR
+from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR, \
+    IMAGES_METADATA_FILENAME
 
 
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
@@ -113,7 +112,7 @@ class SimpleModel(BaseModel):
             target_one_hot = tf.one_hot(targets, 2)
 
             cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits, target_one_hot)
-            loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1,2]))
+            loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1, 2]))
 
             # targets = self.input_dict['Y']
 
@@ -142,8 +141,15 @@ def main():
 
     import matplotlib.pyplot as plt
 
-    images_data, images_metadata, images_masks, channels_mean, channels_std = load_pickle(IMAGES_METADATA_MASKS_FILENAME)
-    logging.info('Images: %s, metadata: %s, masks: %s', len(images_data), len(images_metadata), len(images_masks))
+    # images_data, images_metadata, images_masks, channels_mean, channels_std = load_pickle(IMAGES_METADATA_MASKS_FILENAME)
+    # logging.info('Images: %s, metadata: %s, masks: %s', len(images_data), len(images_metadata), len(images_masks))
+    images_data = load_pickle(IMAGES_NORMALIZED_FILENAME)
+    images_masks = load_pickle(IMAGES_MASKS_FILENAME)
+    logging.info('Images: %s, masks: %s', len(images_data), len(images_masks))
+
+    images_metadata, channels_mean, channels_std = load_pickle(IMAGES_METADATA_FILENAME)
+    logging.info('Images metadata: %s, mean: %s, std: %s',
+                 len(images_metadata), channels_mean.shape, channels_std.shape)
 
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
     sess_config.gpu_options.allow_growth = True
@@ -171,7 +177,7 @@ def main():
 
     # train model
 
-    nb_epoch = 5000
+    nb_epoch = 50000
     batch_size = 40
     images = np.array([img_id for img_id in images_data.keys() if images_masks[img_id][target_class].sum() > 0])
     X = None
@@ -192,11 +198,12 @@ def main():
                 img_height = img_data.shape[0]
                 img_width = img_data.shape[1]
 
-                img_random_c1 = (np.random.randint(0, img_height - patch_size[0]), np.random.randint(0, img_width - patch_size[1]))
+                img_random_c1 = (
+                np.random.randint(0, img_height - patch_size[0]), np.random.randint(0, img_width - patch_size[1]))
                 img_random_c2 = (img_random_c1[0] + patch_size[0], img_random_c1[1] + patch_size[1])
 
-                img_patch = img_data[img_random_c1[0]:img_random_c2[0],img_random_c1[1]:img_random_c2[1],:]
-                img_mask = img_mask_data[img_random_c1[0]:img_random_c2[0],img_random_c1[1]:img_random_c2[1]]
+                img_patch = img_data[img_random_c1[0]:img_random_c2[0], img_random_c1[1]:img_random_c2[1], :]
+                img_mask = img_mask_data[img_random_c1[0]:img_random_c2[0], img_random_c1[1]:img_random_c2[1]]
 
                 # add only samples with some amount of target class
                 mask_fraction = img_mask.sum() / (patch_size[0] * patch_size[1])
@@ -225,7 +232,7 @@ def main():
                 Y_true = np.expand_dims(Y_true, 3)
 
                 for j in range(nb_test_images):
-                    suffix = 'epoch_{}_image_{}/'.format(i,j)
+                    suffix = 'epoch_{}_image_{}/'.format(i, j)
                     model.write_image_summary(suffix + 'image', X_test[j] * channels_std + channels_mean)
                     model.write_image_summary(suffix + 'true', Y_true[j])
                     model.write_image_summary(suffix + 'pred', Y_pred[j])
@@ -248,7 +255,8 @@ def main():
 
     title = 'Epoch {}'.format(i)
     filename = os.path.join(FIGURES_DIR, 'test.png')
-    plot_test_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std, title=title, filename=filename, show=False)
+    plot_test_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std, title=title, filename=filename,
+                          show=False)
 
 
 if __name__ == '__main__':
