@@ -26,11 +26,14 @@ class SimpleModel(BaseModel):
         input = self.input_dict['X']
         input_shape = tf.shape(input)
 
-        batch_norm_params = {'is_training': self.is_train, 'decay': 0.9, 'updates_collections': None}
+        targets = self.input_dict['Y']
+        targets_shape = tf.shape(targets)
+        nb_classes = int(targets.get_shape()[3])
 
         net = input
 
         # VGG-16
+        batch_norm_params = {'is_training': self.is_train, 'decay': 0.999, 'updates_collections': None}
         with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
                 normalizer_fn=slim.batch_norm, normalizer_params=batch_norm_params):
             net = slim.conv2d(net, 64, [3, 3], scope='conv1_1')
@@ -63,75 +66,38 @@ class SimpleModel(BaseModel):
 
             # upsampling
 
-            ################
-            # FCN-32s
-            # net = slim.convolution2d_transpose(net, 1, [64, 64], stride=32 ,scope='upsamle_1') # 2 * factor - factor % 2
-
-            ################
-            # FCN-16s
-            #
-            # # first, upsample x2 and add scored pool4
-            # net = slim.convolution2d_transpose(net, 1, [4, 4], stride=2, scope='upsamle_1')
-            # pool4_scored = slim.conv2d(pool4, 1, [1, 1], scope='pool4_scored', activation_fn=None)
-            # net = net + pool4_scored
-            #
-            # # second, umsample x16
-            # net = slim.convolution2d_transpose(net, 1, [32, 32], stride=16 ,scope='upsamle_2')
-
-
-            ################
-            # FCN-8s
-
             # first, upsample x2 and add scored pool4
-            net = slim.conv2d_transpose(net, 512, [4, 4], stride=2, scope='upsamle_1')
+            net = slim.conv2d_transpose(net, 512, [4, 4], stride=2, scope='upsample_1')
             pool4_scored = slim.conv2d(pool4, 512, [1, 1], scope='pool4_scored', activation_fn=None)
             net = net + pool4_scored
 
             # second, upsample x2 and add scored pool3
-            net = slim.conv2d_transpose(net, 256, [4, 4], stride=2, scope='upsamle_2')
+            net = slim.conv2d_transpose(net, 256, [4, 4], stride=2, scope='upsample_2')
             pool3_scored = slim.conv2d(pool3, 256, [1, 1], scope='pool3_scored', activation_fn=None)
             net = net + pool3_scored
 
             # finally, upsample x8
-            net = slim.conv2d_transpose(net, 2, [16, 16], stride=8, scope='upsamle_3', activation_fn=None)
+            net = slim.conv2d_transpose(net, nb_classes, [16, 16], stride=8, scope='upsample_3', activation_fn=None)
 
         ########
         # Logits
 
-        input_shape = input.get_shape()
-        # logits = tf.reshape(net, (-1, int(input_shape[1]), int(input_shape[2]),))
-        # logits = tf.reshape(net, (-1, input_shape[1], input_shape[2],))
-
-        logits = net
-
         with tf.name_scope('prediction'):
-            predcit_probs = tf.nn.softmax(logits)
-            predict = tf.argmax(predcit_probs, axis=3)
+            classes_probs = tf.nn.sigmoid(net)
 
-            self.op_predict = predict
+            self.op_predict = classes_probs
 
         with tf.name_scope('loss'):
-            targets = tf.cast(self.input_dict['Y'], dtype=tf.int32)
-
-            target_one_hot = tf.one_hot(targets, 2)
-
-            cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits, target_one_hot)
+            cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(net, targets)
             loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1, 2]))
-
-            # targets = self.input_dict['Y']
-
-            # logits_reshaped = tf.reshape(logits, (-1, 1))
-            # targets_reshaped = tf.reshape(targets, (-1, 1))
-            #
-            # cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits_reshaped, targets_reshaped)
-            #
-            # loss = tf.reduce_mean(cross_entropy)
 
             self.op_loss = loss
 
-    def write_image_summary(self, name, image):
+    def write_image_summary(self, name, image, nb_test_images=3):
         if self.log_writer is not None:
-            summary_op = tf.summary.image(name, tf.expand_dims(tf.constant(image, dtype=tf.float32), 0))
+            image_data = tf.constant(image, dtype=tf.float32)
+
+            summary_op = tf.summary.image(name, image_data, max_outputs=nb_test_images)
             summary_res = self.sess.run(summary_op)
             self.log_writer.add_summary(summary_res, self._global_step)
 
@@ -166,16 +132,13 @@ def main():
     model.set_session(sess)
     model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model'))
 
-    # TODO: not a fixed size
-    # model.add_input('X', [None, None, 3])
-    # model.add_input('Y', [None, None])
-
     patch_size = (256, 256,)
     nb_channels = 3
-    target_class = 1
+    nb_classes = 10
 
+    # TODO: not a fixed size
     model.add_input('X', [patch_size[0], patch_size[0], nb_channels])
-    model.add_input('Y', [patch_size[0], patch_size[0], ])
+    model.add_input('Y', [patch_size[0], patch_size[0], nb_classes])
 
     model.build_model()
 
@@ -183,10 +146,14 @@ def main():
 
     nb_epoch = 50000
     batch_size = 40
-    images = np.array([img_id for img_id in images_data.keys() if images_masks[img_id][target_class].sum() > 0])
+    nb_test_images = 3
+
     X = None
     Y = None
     i = 0
+
+    images = np.array(list(images_data.keys()))
+    classes = np.arange(1, nb_classes+1)
     for i in range(nb_epoch):
         try:
             # sample random patches from images
@@ -197,17 +164,19 @@ def main():
                 img_id = np.random.choice(images)
 
                 img_data = images_data[img_id]
-                img_mask_data = images_masks[img_id][target_class]
+                img_mask_data = np.stack([images_masks[img_id][target_class] for target_class in classes], axis=-1)
 
                 img_height = img_data.shape[0]
                 img_width = img_data.shape[1]
 
-                img_random_c1 = (
-                np.random.randint(0, img_height - patch_size[0]), np.random.randint(0, img_width - patch_size[1]))
-                img_random_c2 = (img_random_c1[0] + patch_size[0], img_random_c1[1] + patch_size[1])
+                img_c1 = (
+                    np.random.randint(0, img_height - patch_size[0]),
+                    np.random.randint(0, img_width - patch_size[1])
+                )
+                img_c2 = (img_c1[0] + patch_size[0], img_c1[1] + patch_size[1])
 
-                img_patch = img_data[img_random_c1[0]:img_random_c2[0], img_random_c1[1]:img_random_c2[1], :]
-                img_mask = img_mask_data[img_random_c1[0]:img_random_c2[0], img_random_c1[1]:img_random_c2[1]]
+                img_patch = img_data[img_c1[0]:img_c2[0], img_c1[1]:img_c2[1], :]
+                img_mask = img_mask_data[img_c1[0]:img_c2[0], img_c1[1]:img_c2[1], :]
 
                 # add only samples with some amount of target class
                 mask_fraction = img_mask.sum() / (patch_size[0] * patch_size[1])
@@ -222,24 +191,25 @@ def main():
             model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
 
             if i % 50 == 0:
-                # plot sample predictions
-                nb_test_images = 3
+                data_dict_test = {'X': X}
+                Y_pred_probs = model.predict(data_dict_test)
+                Y_pred_probs = np.array(Y_pred_probs)
+                Y_pred = np.round(Y_pred_probs)
 
-                X_test = X[:nb_test_images]
-                Y_true = Y[:nb_test_images]
-                data_dict_test = {'X': X_test}
-                Y_pred = model.predict(data_dict_test)
-                Y_pred = np.array(Y_pred)
 
                 # tensorboard's requirement
-                Y_pred = np.expand_dims(Y_pred, 3)
-                Y_true = np.expand_dims(Y_true, 3)
+                # Y_pred = np.expand_dims(Y_pred, 3)
 
-                for j in range(nb_test_images):
-                    suffix = 'epoch_{}_image_{}/'.format(i, j)
-                    model.write_image_summary(suffix + 'image', X_test[j] * channels_std + channels_mean)
-                    model.write_image_summary(suffix + 'true', Y_true[j])
-                    model.write_image_summary(suffix + 'pred', Y_pred[j])
+                classes_to_plot = [1, 6] # Building and crops
+
+                for target_class in classes_to_plot:
+                    prefix = 'epoch_{}_class_{}/'.format(i, target_class)
+                    model.write_image_summary(prefix + 'image', X * channels_std + channels_mean)
+
+                    Y_true_class = np.expand_dims(Y[:,:,:,target_class-1], 3)
+                    Y_pred_class = np.expand_dims(Y_pred[:,:,:,target_class-1], 3)
+                    model.write_image_summary(prefix + 'true', Y_true_class)
+                    model.write_image_summary(prefix + 'pred', Y_pred_class)
 
                 model_name = os.path.join(MODELS_DIR, 'simple_model')
                 saved_filaname = model.save_model(model_name, global_step=i)
@@ -247,20 +217,6 @@ def main():
 
         except KeyboardInterrupt:
             break
-
-    # plot sample predictions
-    nb_test_images = 3
-
-    X_test = X[:nb_test_images]
-    Y_true = Y[:nb_test_images]
-    data_dict_test = {'X': X_test}
-    Y_pred = model.predict(data_dict_test)
-    Y_pred = np.array(Y_pred)
-
-    title = 'Epoch {}'.format(i)
-    filename = os.path.join(FIGURES_DIR, 'test.png')
-    plot_test_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std, title=title, filename=filename,
-                          show=False)
 
 
 if __name__ == '__main__':
