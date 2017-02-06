@@ -26,70 +26,74 @@ class SimpleModel(BaseModel):
         input = self.input_dict['X']
         input_shape = tf.shape(input)
 
+        batch_norm_params = {'is_training': self.is_train, 'decay': 0.9, 'updates_collections': None}
+
         net = input
 
         # VGG-16
-        net = slim.conv2d(net, 64, [3, 3], scope='conv1_1')
-        net = slim.conv2d(net, 64, [3, 3], scope='conv1_2')
-        net = slim.max_pool2d(net, [2, 2], scope='pool1_1')
+        with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
+                normalizer_fn=slim.batch_norm, normalizer_params=batch_norm_params):
+            net = slim.conv2d(net, 64, [3, 3], scope='conv1_1')
+            net = slim.conv2d(net, 64, [3, 3], scope='conv1_2')
+            net = slim.max_pool2d(net, [2, 2], scope='pool1_1')
 
-        net = slim.conv2d(net, 128, [3, 3], scope='conv2_1')
-        net = slim.conv2d(net, 128, [3, 3], scope='conv2_2')
-        net = slim.max_pool2d(net, [2, 2], scope='pool2_1')
+            net = slim.conv2d(net, 128, [3, 3], scope='conv2_1')
+            net = slim.conv2d(net, 128, [3, 3], scope='conv2_2')
+            net = slim.max_pool2d(net, [2, 2], scope='pool2_1')
 
-        net = slim.conv2d(net, 256, [3, 3], scope='conv3_1')
-        net = slim.conv2d(net, 256, [3, 3], scope='conv3_2')
-        net = slim.conv2d(net, 256, [3, 3], scope='conv3_3')
-        net = slim.max_pool2d(net, [2, 2], scope='pool3_1')
-        pool3 = net  # save pool3 reference for FCN-8s
+            net = slim.conv2d(net, 256, [3, 3], scope='conv3_1')
+            net = slim.conv2d(net, 256, [3, 3], scope='conv3_2')
+            net = slim.conv2d(net, 256, [3, 3], scope='conv3_3')
+            net = slim.max_pool2d(net, [2, 2], scope='pool3_1')
+            pool3 = net  # save pool3 reference for FCN-8s
 
-        net = slim.conv2d(net, 512, [3, 3], scope='conv4_1')
-        net = slim.conv2d(net, 512, [3, 3], scope='conv4_2')
-        net = slim.conv2d(net, 512, [3, 3], scope='conv4_3')
-        net = slim.max_pool2d(net, [2, 2], scope='pool4_1')
-        pool4 = net  # save pool4 reference for FCN-16s
+            net = slim.conv2d(net, 512, [3, 3], scope='conv4_1')
+            net = slim.conv2d(net, 512, [3, 3], scope='conv4_2')
+            net = slim.conv2d(net, 512, [3, 3], scope='conv4_3')
+            net = slim.max_pool2d(net, [2, 2], scope='pool4_1')
+            pool4 = net  # save pool4 reference for FCN-16s
 
-        net = slim.conv2d(net, 512, [3, 3], scope='conv5_1')
-        net = slim.conv2d(net, 512, [3, 3], scope='conv5_2')
-        net = slim.conv2d(net, 512, [3, 3], scope='conv5_3')
-        net = slim.max_pool2d(net, [2, 2], scope='pool5_1')
+            net = slim.conv2d(net, 512, [3, 3], scope='conv5_1')
+            net = slim.conv2d(net, 512, [3, 3], scope='conv5_2')
+            net = slim.conv2d(net, 512, [3, 3], scope='conv5_3')
+            net = slim.max_pool2d(net, [2, 2], scope='pool5_1')
 
-        net = slim.conv2d(net, 4096, [1, 1], scope='conv6')
-        net = slim.conv2d(net, 1000, [1, 1], scope='conv7')
+            net = slim.conv2d(net, 4096, [1, 1], scope='conv6')
+            net = slim.conv2d(net, 1000, [1, 1], scope='conv7')
 
-        # upsampling
+            # upsampling
 
-        ################
-        # FCN-32s
-        # net = slim.convolution2d_transpose(net, 1, [64, 64], stride=32 ,scope='upsamle_1') # 2 * factor - factor % 2
+            ################
+            # FCN-32s
+            # net = slim.convolution2d_transpose(net, 1, [64, 64], stride=32 ,scope='upsamle_1') # 2 * factor - factor % 2
 
-        ################
-        # FCN-16s
-        #
-        # # first, upsample x2 and add scored pool4
-        # net = slim.convolution2d_transpose(net, 1, [4, 4], stride=2, scope='upsamle_1')
-        # pool4_scored = slim.conv2d(pool4, 1, [1, 1], scope='pool4_scored', activation_fn=None)
-        # net = net + pool4_scored
-        #
-        # # second, umsample x16
-        # net = slim.convolution2d_transpose(net, 1, [32, 32], stride=16 ,scope='upsamle_2')
+            ################
+            # FCN-16s
+            #
+            # # first, upsample x2 and add scored pool4
+            # net = slim.convolution2d_transpose(net, 1, [4, 4], stride=2, scope='upsamle_1')
+            # pool4_scored = slim.conv2d(pool4, 1, [1, 1], scope='pool4_scored', activation_fn=None)
+            # net = net + pool4_scored
+            #
+            # # second, umsample x16
+            # net = slim.convolution2d_transpose(net, 1, [32, 32], stride=16 ,scope='upsamle_2')
 
 
-        ################
-        # FCN-8s
+            ################
+            # FCN-8s
 
-        # first, upsample x2 and add scored pool4
-        net = slim.convolution2d_transpose(net, 512, [4, 4], stride=2, scope='upsamle_1')
-        pool4_scored = slim.conv2d(pool4, 512, [1, 1], scope='pool4_scored', activation_fn=None)
-        net = net + pool4_scored
+            # first, upsample x2 and add scored pool4
+            net = slim.conv2d_transpose(net, 512, [4, 4], stride=2, scope='upsamle_1')
+            pool4_scored = slim.conv2d(pool4, 512, [1, 1], scope='pool4_scored', activation_fn=None)
+            net = net + pool4_scored
 
-        # second, upsample x2 and add scored pool3
-        net = slim.convolution2d_transpose(net, 256, [4, 4], stride=2, scope='upsamle_2')
-        pool3_scored = slim.conv2d(pool3, 256, [1, 1], scope='pool3_scored', activation_fn=None)
-        net = net + pool3_scored
+            # second, upsample x2 and add scored pool3
+            net = slim.conv2d_transpose(net, 256, [4, 4], stride=2, scope='upsamle_2')
+            pool3_scored = slim.conv2d(pool3, 256, [1, 1], scope='pool3_scored', activation_fn=None)
+            net = net + pool3_scored
 
-        # finally, upsample x8
-        net = slim.convolution2d_transpose(net, 2, [16, 16], stride=8, scope='upsamle_3', activation_fn=None)
+            # finally, upsample x8
+            net = slim.conv2d_transpose(net, 2, [16, 16], stride=8, scope='upsamle_3', activation_fn=None)
 
         ########
         # Logits
