@@ -1,16 +1,20 @@
 import logging
+from collections import Counter
+
 import os
 
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+from random import shuffle
 
 from tensorflow_helpers.models.base_model import BaseModel
+from tensorflow_helpers.utils.data import batch_generator
 
 from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle
 from utils.matplotlib import matplotlib_setup, plot_mask, plot_image, plot_test_predictions
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR, \
-    IMAGES_METADATA_FILENAME, TRAIN_PATCHES_FILENAME
+    IMAGES_METADATA_FILENAME, TRAIN_PATCHES_COORDINATES_FILENAME
 
 
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
@@ -109,17 +113,36 @@ def main():
 
     matplotlib_setup()
 
-    # load sampled patches
-    with np.load(TRAIN_PATCHES_FILENAME) as data:
-        X = data['train_patches']
-        Y = data['train_mask']
-
-    logging.info('X: %s, Y: %s', X.shape, Y.shape)
+    # load images
+    images_data = load_pickle(IMAGES_NORMALIZED_FILENAME)
+    images_masks = load_pickle(IMAGES_MASKS_FILENAME)
+    logging.info('Images: %s, masks: %s', len(images_data), len(images_masks))
 
     # load images metadata
     images_metadata, channels_mean, channels_std = load_pickle(IMAGES_METADATA_FILENAME)
     logging.info('Images metadata: %s, mean: %s, std: %s',
                  len(images_metadata), channels_mean.shape, channels_std.shape)
+
+
+    # load sampled coordinates patches
+    patches_coordinates = load_pickle(TRAIN_PATCHES_COORDINATES_FILENAME)
+    nb_train_patches = len(patches_coordinates)
+    logging.info('Train patches coordinates: %s', nb_train_patches)
+
+    images = sorted(set([pc[0] for pc in patches_coordinates]))
+    logging.info('Train images: %s', len(images))
+
+    nb_classes = 10
+    classes = np.arange(1, nb_classes + 1)
+    images_masks_stacked = {
+        img_id: np.stack([images_masks[img_id][target_class] for target_class in classes], axis=-1)
+        for img_id in images
+    }
+
+    patch_size = (patches_coordinates[0][3]-patches_coordinates[0][1], patches_coordinates[0][4]-patches_coordinates[0][2],)
+    nb_channels = images_data[images[0]].shape[2]
+    nb_classes = len(images_masks[images[0]])
+
 
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
     sess_config.gpu_options.allow_growth = True
@@ -132,10 +155,6 @@ def main():
     model.set_session(sess)
     model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model'))
 
-    patch_size = (X.shape[1],X.shape[2],)
-    nb_channels = X.shape[3]
-    nb_classes = Y.shape[3]
-
     # TODO: not a fixed size
     model.add_input('X', [patch_size[0], patch_size[0], nb_channels])
     model.add_input('Y', [patch_size[0], patch_size[0], nb_classes])
@@ -144,39 +163,52 @@ def main():
 
     # train model
 
-    nb_epoch = 10
+    nb_iteratinos = 10
+    epoch_size = 1000
     batch_size = 40
     nb_test_images = 3
-    data_dict_train = {'X': X, 'Y': Y}
-    for i in range(nb_epoch):
-        try:
-            model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
 
-            if i % 2 == 0:
-                X_test = X[:nb_test_images]
-                Y_test = Y[:nb_test_images]
-                data_dict_test = {'X': X_test}
-                Y_pred_probs = model.predict(data_dict_test)
-                Y_pred_probs = np.array(Y_pred_probs)
-                Y_pred = np.round(Y_pred_probs)
+    X = np.zeros((epoch_size, patch_size[0], patch_size[1], nb_channels))
+    Y = np.zeros((epoch_size, patch_size[0], patch_size[1], nb_classes))
 
-                classes_to_plot = [1, 6] # Building and crops
+    for iteration_number in range(nb_iteratinos):
+        shuffle(patches_coordinates)
+        for epoch_number, (start, end) in enumerate(batch_generator(nb_train_patches, epoch_size, discard_last_batch=True)):
+            try:
+                for j in range(epoch_size):
+                    current_patch = patches_coordinates[start + j]
+                    img_id  = current_patch[0]
+                    X[j] = images_data[img_id][current_patch[1]:current_patch[3], current_patch[2]:current_patch[4], :]
+                    Y[j] = images_masks_stacked[img_id][current_patch[1]:current_patch[3], current_patch[2]:current_patch[4], :]
 
-                for target_class in classes_to_plot:
-                    prefix = 'epoch_{}_class_{}/'.format(i, target_class)
-                    model.write_image_summary(prefix + 'image', X_test * channels_std + channels_mean)
+                data_dict_train = {'X': X, 'Y': Y}
+                model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
 
-                    Y_true_class = np.expand_dims(Y_test[:,:,:,target_class-1], 3)
-                    Y_pred_class = np.expand_dims(Y_pred[:,:,:,target_class-1], 3)
-                    model.write_image_summary(prefix + 'true', Y_true_class)
-                    model.write_image_summary(prefix + 'pred', Y_pred_class)
+                if epoch_number % 10 == 0:
+                    X_test = X[:nb_test_images]
+                    Y_test = Y[:nb_test_images]
+                    data_dict_test = {'X': X_test}
+                    Y_pred_probs = model.predict(data_dict_test)
+                    Y_pred_probs = np.array(Y_pred_probs)
+                    Y_pred = np.round(Y_pred_probs)
 
-                model_name = os.path.join(MODELS_DIR, 'simple_model')
-                saved_filaname = model.save_model(model_name, global_step=i)
-                logging.info('Model saved: %s', saved_filaname)
+                    classes_to_plot = [1, 6] # Building and crops
 
-        except KeyboardInterrupt:
-            break
+                    for target_class in classes_to_plot:
+                        prefix = 'epoch_{}_class_{}/'.format(epoch_number, target_class)
+                        model.write_image_summary(prefix + 'image', X_test * channels_std + channels_mean)
+
+                        Y_true_class = np.expand_dims(Y_test[:,:,:,target_class-1], 3)
+                        Y_pred_class = np.expand_dims(Y_pred[:,:,:,target_class-1], 3)
+                        model.write_image_summary(prefix + 'true', Y_true_class)
+                        model.write_image_summary(prefix + 'pred', Y_pred_class)
+
+                    model_name = os.path.join(MODELS_DIR, 'simple_model')
+                    saved_filaname = model.save_model(model_name, global_step=epoch_number)
+                    logging.info('Model saved: %s', saved_filaname)
+
+            except KeyboardInterrupt:
+                break
 
 
 if __name__ == '__main__':

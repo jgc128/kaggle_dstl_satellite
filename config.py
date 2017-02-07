@@ -21,4 +21,4 @@ MODELS_DIR = os.path.join(DATA_DIR, 'models/')
 FIGURES_DIR = os.path.join(DATA_DIR, 'figures/')
 TENSORBOARD_DIR = os.path.join(DATA_DIR, 'tensorboard/')
 
-TRAIN_PATCHES_FILENAME = os.path.join(DATA_DIR, 'train_pathes.npz')
+TRAIN_PATCHES_COORDINATES_FILENAME = os.path.join(DATA_DIR, 'train_pathes.npz')
