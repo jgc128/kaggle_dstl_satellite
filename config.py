@@ -6,6 +6,8 @@ DEBUG_IMAGE = '6120_2_2'
 
 DATA_DIR = './data/'
 
+SAMPLE_SUBMISSION_FILENAME = os.path.join(DATA_DIR, 'sample_submission.csv')
+
 GRID_SIZES_FILENAME = os.path.join(DATA_DIR, 'grid_sizes.csv')
 POLYGONS_FILENAME = os.path.join(DATA_DIR, 'train_wkt_v4.csv')
 IMAGES_THREE_BAND_DIR = os.path.join(DATA_DIR, 'three_band/')
@@ -22,3 +24,5 @@ FIGURES_DIR = os.path.join(DATA_DIR, 'figures/')
 TENSORBOARD_DIR = os.path.join(DATA_DIR, 'tensorboard/')
 
 TRAIN_PATCHES_COORDINATES_FILENAME = os.path.join(DATA_DIR, 'train_pathes.npz')
+
+SUBMISSION_DIR = os.path.join(DATA_DIR, 'submissions/')

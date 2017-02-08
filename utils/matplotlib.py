@@ -18,7 +18,7 @@ def matplotlib_setup():
     logging.info('Matplotlib backend: %s', matplotlib.get_backend())
 
 
-def plot_image(image_data, figure=None, subplot='111'):
+def plot_image(image_data, figure=None, subplot=111):
     import matplotlib.pyplot as plt
     import tifffile as tiff
 
@@ -31,7 +31,7 @@ def plot_image(image_data, figure=None, subplot='111'):
     plt.show()
 
 
-def plot_mask(mask_data, figure=None, subplot=None):
+def plot_mask(mask_data, figure=None, subplot=111):
     """Adopted from https://www.kaggle.com/lopuhin/dstl-satellite-imagery-feature-detection/full-pipeline-demo-poly-pixels-ml-poly"""
     import matplotlib.pyplot as plt
     import tifffile as tiff

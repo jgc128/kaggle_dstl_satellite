@@ -1,11 +1,19 @@
+from collections import defaultdict
+
 import cv2
 import shapely
 import shapely.wkt
 import shapely.affinity
+import rasterio
+import rasterio.features
 import numpy as np
 
 # https://mapbox.github.io/rasterio/api/rasterio.features.html
 # rasterio.features.rasterize()
+
+# def helper(poly):
+#     polygons = shapely.wkt.loads(poly).buffer(0.00001)
+#     return shapely.wkt.dumps(polygons)
 
 def round_coords(coords):
     return np.array(coords).round().astype(np.int32)
@@ -61,3 +69,64 @@ def join_patches_to_image(patches, patches_coord, image_height, image_width):
         image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :] = patches[i]
 
     return image_data
+
+def mask_to_polygons(mask, epsilon=5, min_area=1.):
+    # __author__ = Konstantin Lopuhin
+    # https://www.kaggle.com/lopuhin/dstl-satellite-imagery-feature-detection/full-pipeline-demo-poly-pixels-ml-poly
+
+    from shapely.geometry import MultiPolygon, Polygon
+
+    # first, find contours with cv2: it's much faster than shapely
+    image, contours, hierarchy = cv2.findContours(
+        ((mask == 1) * 255).astype(np.uint8),
+        cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS)
+    # create approximate contours to have reasonable submission size
+    approx_contours = [cv2.approxPolyDP(cnt, epsilon, True)
+                       for cnt in contours]
+    if not contours:
+        return MultiPolygon()
+
+    # now messy stuff to associate parent and child contours
+    cnt_children = defaultdict(list)
+    child_contours = set()
+    assert hierarchy.shape[0] == 1
+    # http://docs.opencv.org/3.1.0/d9/d8b/tutorial_py_contours_hierarchy.html
+    for idx, (_, _, _, parent_idx) in enumerate(hierarchy[0]):
+        if parent_idx != -1:
+            child_contours.add(idx)
+            cnt_children[parent_idx].append(approx_contours[idx])
+    # create actual polygons filtering by area (removes artifacts)
+    all_polygons = []
+    for idx, cnt in enumerate(approx_contours):
+        if idx not in child_contours and cv2.contourArea(cnt) >= min_area:
+            assert cnt.shape[1] == 1
+            poly = Polygon(
+                shell=cnt[:, 0, :],
+                holes=[c[:, 0, :] for c in cnt_children.get(idx, [])
+                       if cv2.contourArea(c) >= min_area])
+            all_polygons.append(poly)
+    # approximating polygons might have created invalid ones, fix them
+    all_polygons = MultiPolygon(all_polygons)
+    if not all_polygons.is_valid:
+        all_polygons = all_polygons.buffer(0)
+        # Sometimes buffer() converts a simple Multipolygon to just a Polygon,
+        # need to keep it a Multi throughout
+        if all_polygons.type == 'Polygon':
+            all_polygons = MultiPolygon([all_polygons])
+    return all_polygons
+
+
+def create_polygons_from_mask(mask, image_metadata):
+    # shapes = rasterio.features.shapes(mask)
+    # for shp in shapes:
+    #     a = 'zzz'
+
+    poly = mask_to_polygons(mask)
+
+    poly = poly.buffer(-0.001).buffer(0.001)
+
+    x_scaler = image_metadata['x_scaler']
+    y_scaler = image_metadata['y_scaler']
+    poly_scaled = shapely.affinity.scale(poly, xfact=1.0 / x_scaler, yfact=1.0 / y_scaler, origin=(0, 0, 0))
+
+    return poly_scaled

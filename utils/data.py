@@ -83,3 +83,10 @@ def get_images_sizes(directory, target_images=None):
 
     logging.info('Image sizes: %s', len(images_sizes))
     return images_sizes
+
+
+def load_sample_submission(filename):
+    data = pd.read_csv(filename)
+    logging.info('Sample submission: %s', data.shape)
+
+    return data
