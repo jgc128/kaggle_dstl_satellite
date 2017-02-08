@@ -18,7 +18,7 @@ def matplotlib_setup():
     logging.info('Matplotlib backend: %s', matplotlib.get_backend())
 
 
-def plot_image(image_data, figure=None, subplot=None):
+def plot_image(image_data, figure=None, subplot='111'):
     import matplotlib.pyplot as plt
     import tifffile as tiff
 

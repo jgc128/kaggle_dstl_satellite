@@ -1,6 +1,6 @@
 import logging
 from collections import Counter
-
+import sys
 import os
 
 import numpy as np
@@ -14,12 +14,13 @@ from tensorflow_helpers.utils.data import batch_generator
 from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle
 from utils.matplotlib import matplotlib_setup, plot_mask, plot_image, plot_test_predictions
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR, \
-    IMAGES_METADATA_FILENAME, TRAIN_PATCHES_COORDINATES_FILENAME
-
+    IMAGES_METADATA_FILENAME, TRAIN_PATCHES_COORDINATES_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
+    IMAGES_TEST_NORMALIZED_DATA_DIR, IMAGES_TEST_PREDICTION_MASK_DIR
 
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
 # https://github.com/shekkizh/FCN.tensorflow
 # https://github.com/warmspringwinds/tf-image-segmentation
+from utils.polygon import split_image_to_patches, join_patches_to_image
 
 
 class SimpleModel(BaseModel):
@@ -214,5 +215,86 @@ def main():
                 break
 
 
+
+
+def predict():
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s : %(levelname)s : %(module)s : %(message)s", datefmt="%d-%m-%Y %H:%M:%S"
+    )
+
+    matplotlib_setup()
+
+    logging.info('Prediction')
+
+    # load images metadata
+    images_metadata, channels_mean, channels_std = load_pickle(IMAGES_METADATA_FILENAME)
+    logging.info('Images metadata: %s, mean: %s, std: %s', len(images_metadata), channels_mean.shape,
+                 channels_std.shape)
+
+    images_metadata_polygons = load_pickle(IMAGES_METADATA_POLYGONS_FILENAME)
+    logging.info('Polygons metadata: %s', len(images_metadata_polygons))
+
+    images_all = list(images_metadata.keys())
+    images_train = list(images_metadata_polygons.keys())
+    images_test = sorted(set(images_all) - set(images_train))
+    # images_test = images_test[:10]
+    nb_test_images = len(images_test)
+    logging.info('Test images: %s', nb_test_images)
+
+
+    patch_size = (256, 256)
+    nb_channels = 3
+    nb_classes = 10
+
+    # create and load model
+    sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
+    sess_config.gpu_options.allow_growth = True
+    sess = tf.Session(config=sess_config)
+
+    model_params = {
+
+    }
+    model = SimpleModel(**model_params)
+    model.set_session(sess)
+    model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model'))
+
+    # TODO: not a fixed size
+    model.add_input('X', [patch_size[0], patch_size[0], nb_channels])
+    model.add_input('Y', [patch_size[0], patch_size[0], nb_classes])
+
+    model.build_model()
+
+    model_filename = os.path.join(MODELS_DIR, 'simple_model-91')
+    model.restore_model(model_filename)
+    logging.info('Model restored: %s', os.path.basename(model_filename))
+
+    for i, img_id in enumerate(images_test):
+        img_filename = os.path.join(IMAGES_TEST_NORMALIZED_DATA_DIR, img_id + '.npy')
+        img_data = np.load(img_filename)
+
+        patches, patches_coord = split_image_to_patches(img_data, patch_size)
+
+        X = np.array(patches)
+        data_dict = {'X': X}
+        classes_prob = model.predict(data_dict)
+        mask_patches = np.round(np.array(classes_prob)).astype(np.uint8)
+
+        mask_joined = join_patches_to_image(mask_patches, patches_coord, img_data.shape[0], img_data.shape[1])
+
+        mask_filename = os.path.join(IMAGES_TEST_PREDICTION_MASK_DIR, img_id + '.npy')
+        np.save(mask_filename, mask_joined)
+
+        if (i + 1) % 10 == 0:
+            logging.info('Predicted: %s/%s [%.2f]', i, nb_test_images, 100 * i / nb_test_images)
+
 if __name__ == '__main__':
-    main()
+    task = 'main'
+
+    if len(sys.argv) > 1:
+        task = sys.argv[1]
+
+    if task == 'predict':
+        predict()
+
+    if task == 'main':
+        main()
