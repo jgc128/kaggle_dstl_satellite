@@ -171,6 +171,7 @@ def main():
     X = np.zeros((epoch_size, patch_size[0], patch_size[1], nb_channels))
     Y = np.zeros((epoch_size, patch_size[0], patch_size[1], nb_classes))
 
+    global_step = 0
     for iteration_number in range(nb_iteratinos):
         shuffle(patches_coordinates)
         for epoch_number, (start, end) in enumerate(batch_generator(nb_train_patches, epoch_size, discard_last_batch=True)):
@@ -185,6 +186,8 @@ def main():
                 model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
 
                 if epoch_number % 10 == 0:
+                    global_step += 1
+
                     X_test = X[:nb_test_images]
                     Y_test = Y[:nb_test_images]
                     data_dict_test = {'X': X_test}
@@ -195,7 +198,7 @@ def main():
                     classes_to_plot = [1, 6] # Building and crops
 
                     for target_class in classes_to_plot:
-                        prefix = 'epoch_{}_class_{}/'.format(epoch_number, target_class)
+                        prefix = 'global_step_{}_class_{}/'.format(global_step, target_class)
                         model.write_image_summary(prefix + 'image', X_test * channels_std + channels_mean)
 
                         Y_true_class = np.expand_dims(Y_test[:,:,:,target_class-1], 3)
@@ -204,7 +207,7 @@ def main():
                         model.write_image_summary(prefix + 'pred', Y_pred_class)
 
                     model_name = os.path.join(MODELS_DIR, 'simple_model')
-                    saved_filaname = model.save_model(model_name, global_step=epoch_number)
+                    saved_filaname = model.save_model(model_name, global_step=global_step)
                     logging.info('Model saved: %s', saved_filaname)
 
             except KeyboardInterrupt:
