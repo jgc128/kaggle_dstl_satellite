@@ -90,3 +90,14 @@ def load_sample_submission(filename):
     logging.info('Sample submission: %s', data.shape)
 
     return data
+
+
+def convert_mask_to_one_hot(Y):
+    batch_size, img_height, img_width, nb_classes = Y.shape
+
+    Y *= 2
+    no_class = np.full((batch_size, img_height, img_width), 1, dtype=np.uint8)
+    Y_one_hot = np.insert(Y, 0, no_class, axis=3)
+    Y_one_hot = Y_one_hot.argmax(axis=-1)
+
+    return Y_one_hot

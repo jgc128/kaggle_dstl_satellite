@@ -8,6 +8,7 @@ import rasterio
 import rasterio.features
 import numpy as np
 
+
 # https://mapbox.github.io/rasterio/api/rasterio.features.html
 # rasterio.features.rasterize()
 
@@ -17,6 +18,7 @@ import numpy as np
 
 def round_coords(coords):
     return np.array(coords).round().astype(np.int32)
+
 
 def create_mask_from_metadata(img_metadata, polygon_metadata):
     """Adopted from https://www.kaggle.com/lopuhin/dstl-satellite-imagery-feature-detection/full-pipeline-demo-poly-pixels-ml-poly"""
@@ -69,6 +71,7 @@ def join_patches_to_image(patches, patches_coord, image_height, image_width):
         image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :] = patches[i]
 
     return image_data
+
 
 def mask_to_polygons(mask, epsilon=5, min_area=1.):
     # __author__ = Konstantin Lopuhin
@@ -130,3 +133,39 @@ def create_polygons_from_mask(mask, image_metadata):
     poly_scaled = shapely.affinity.scale(poly, xfact=1.0 / x_scaler, yfact=1.0 / y_scaler, origin=(0, 0, 0))
 
     return poly_scaled
+
+
+def sample_patch(img_data, img_mask_data, patch_size):
+    img_height = img_mask_data.shape[0]
+    img_width = img_mask_data.shape[1]
+
+    img_c1 = (
+        np.random.randint(0, img_height - patch_size[0]),
+        np.random.randint(0, img_width - patch_size[1])
+    )
+    img_c2 = (img_c1[0] + patch_size[0], img_c1[1] + patch_size[1])
+
+    img_patch = img_data[img_c1[0]:img_c2[0], img_c1[1]:img_c2[1], :]
+    img_mask = img_mask_data[img_c1[0]:img_c2[0], img_c1[1]:img_c2[1], :]
+
+    return img_patch, img_mask
+
+
+def sample_patches_batch(images, images_data, images_masks_stacked, patch_size, sample_size):
+    nb_channels = images_data[images[0]].shape[2]
+    nb_classes = images_masks_stacked[images[0]].shape[2]
+
+    X = np.zeros((sample_size, patch_size[0], patch_size[1], nb_channels))
+    Y = np.zeros((sample_size, patch_size[0], patch_size[1], nb_classes), dtype=np.uint8)
+
+    for i in range(sample_size):
+        img_id = np.random.choice(images)
+        img_data = images_data[img_id]
+        img_mask_data = images_masks_stacked[img_id]
+
+        img_patch, img_mask = sample_patch(img_data, img_mask_data, patch_size)
+
+        X[i] = img_patch
+        Y[i] = img_mask
+
+    return X, Y

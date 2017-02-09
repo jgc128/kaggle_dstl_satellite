@@ -11,7 +11,7 @@ from random import shuffle
 from tensorflow_helpers.models.base_model import BaseModel
 from tensorflow_helpers.utils.data import batch_generator
 
-from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle
+from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle, convert_mask_to_one_hot
 from utils.matplotlib import matplotlib_setup, plot_mask, plot_image, plot_test_predictions
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR, \
     IMAGES_METADATA_FILENAME, TRAIN_PATCHES_COORDINATES_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
@@ -20,27 +20,28 @@ from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DI
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
 # https://github.com/shekkizh/FCN.tensorflow
 # https://github.com/warmspringwinds/tf-image-segmentation
-from utils.polygon import split_image_to_patches, join_patches_to_image
+from utils.polygon import split_image_to_patches, join_patches_to_image, sample_patches_batch
 
 
 class SimpleModel(BaseModel):
     def __init__(self, **kwargs):
         super(SimpleModel, self).__init__()
 
+        self.nb_classes = kwargs.get('nb_classes')
+
     def build_model(self):
         input = self.input_dict['X']
         input_shape = tf.shape(input)
 
         targets = self.input_dict['Y']
-        targets_shape = tf.shape(targets)
-        nb_classes = int(targets.get_shape()[3])
+        targets_one_hot = tf.one_hot(targets, self.nb_classes + 1)
 
         net = input
 
         # VGG-16
         batch_norm_params = {'is_training': self.is_train, 'decay': 0.999, 'updates_collections': None}
         with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
-                normalizer_fn=slim.batch_norm, normalizer_params=batch_norm_params):
+                            normalizer_fn=slim.batch_norm, normalizer_params=batch_norm_params):
             net = slim.conv2d(net, 64, [3, 3], scope='conv1_1')
             net = slim.conv2d(net, 64, [3, 3], scope='conv1_2')
             net = slim.max_pool2d(net, [2, 2], scope='pool1_1')
@@ -82,18 +83,19 @@ class SimpleModel(BaseModel):
             net = net + pool3_scored
 
             # finally, upsample x8
-            net = slim.conv2d_transpose(net, nb_classes, [16, 16], stride=8, scope='upsample_3', activation_fn=None)
+            net = slim.conv2d_transpose(net, self.nb_classes + 1, [16, 16], stride=8, scope='upsample_3',
+                                        activation_fn=None)
 
         ########
         # Logits
 
         with tf.name_scope('prediction'):
-            classes_probs = tf.nn.sigmoid(net)
+            classes_probs = tf.nn.softmax(net)
 
             self.op_predict = classes_probs
 
         with tf.name_scope('loss'):
-            cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(net, targets)
+            cross_entropy = tf.nn.softmax_cross_entropy_with_logits(net, targets_one_hot)
             loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1, 2]))
 
             self.op_loss = loss
@@ -124,97 +126,61 @@ def main():
     logging.info('Images metadata: %s, mean: %s, std: %s',
                  len(images_metadata), channels_mean.shape, channels_std.shape)
 
+    images = sorted(list(images_data.keys()))
+    nb_images = len(images)
+    logging.info('Train images: %s', nb_images)
 
-    # load sampled coordinates patches
-    patches_coordinates = load_pickle(TRAIN_PATCHES_COORDINATES_FILENAME)
-    nb_train_patches = len(patches_coordinates)
-    logging.info('Train patches coordinates: %s', nb_train_patches)
-
-    images = sorted(set([pc[0] for pc in patches_coordinates]))
-    logging.info('Train images: %s', len(images))
-
-    nb_classes = 10
+    nb_classes = len(images_masks[images[0]])
     classes = np.arange(1, nb_classes + 1)
     images_masks_stacked = {
         img_id: np.stack([images_masks[img_id][target_class] for target_class in classes], axis=-1)
         for img_id in images
-    }
-
-    patch_size = (patches_coordinates[0][3]-patches_coordinates[0][1], patches_coordinates[0][4]-patches_coordinates[0][2],)
+        }
     nb_channels = images_data[images[0]].shape[2]
-    nb_classes = len(images_masks[images[0]])
+    logging.info('Classes: %s, channels: %s', nb_classes, nb_channels)
 
+    patch_size = (256, 256,)
+    logging.info('Patch size: %s', patch_size)
 
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
     sess_config.gpu_options.allow_growth = True
     sess = tf.Session(config=sess_config)
 
     model_params = {
-
+        'nb_classes': nb_classes
     }
     model = SimpleModel(**model_params)
     model.set_session(sess)
     model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model'))
 
     # TODO: not a fixed size
-    model.add_input('X', [patch_size[0], patch_size[0], nb_channels])
-    model.add_input('Y', [patch_size[0], patch_size[0], nb_classes])
+    model.add_input('X', [patch_size[0], patch_size[1], nb_channels])
+    model.add_input('Y', [patch_size[0], patch_size[1], ], dtype=tf.uint8)
 
     model.build_model()
 
     # train model
 
-    nb_iteratinos = 10
-    epoch_size = 1000
+    nb_iterations = 100000
+    sample_size = 1000
     batch_size = 40
     nb_test_images = 3
 
-    X = np.zeros((epoch_size, patch_size[0], patch_size[1], nb_channels))
-    Y = np.zeros((epoch_size, patch_size[0], patch_size[1], nb_classes))
+    for iteration_number in range(1, nb_iterations + 1):
+        try:
+            X, Y = sample_patches_batch(images, images_data, images_masks_stacked, patch_size, sample_size)
+            Y_one_hot = convert_mask_to_one_hot(Y)
 
-    global_step = 0
-    for iteration_number in range(nb_iteratinos):
-        shuffle(patches_coordinates)
-        for epoch_number, (start, end) in enumerate(batch_generator(nb_train_patches, epoch_size, discard_last_batch=True)):
-            try:
-                for j in range(epoch_size):
-                    current_patch = patches_coordinates[start + j]
-                    img_id  = current_patch[0]
-                    X[j] = images_data[img_id][current_patch[1]:current_patch[3], current_patch[2]:current_patch[4], :]
-                    Y[j] = images_masks_stacked[img_id][current_patch[1]:current_patch[3], current_patch[2]:current_patch[4], :]
+            data_dict_train = {'X': X, 'Y': Y_one_hot}
+            model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
 
-                data_dict_train = {'X': X, 'Y': Y}
-                model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
+            if iteration_number % 15 == 0:
+                model_name = os.path.join(MODELS_DIR, 'simple_model')
+                saved_filename = model.save_model(model_name, global_step=iteration_number)
+                logging.info('Model saved: %s', saved_filename)
 
-                if epoch_number % 10 == 0:
-                    global_step += 1
-
-                    X_test = X[:nb_test_images]
-                    Y_test = Y[:nb_test_images]
-                    data_dict_test = {'X': X_test}
-                    Y_pred_probs = model.predict(data_dict_test)
-                    Y_pred_probs = np.array(Y_pred_probs)
-                    Y_pred = np.round(Y_pred_probs)
-
-                    classes_to_plot = [1, 6] # Building and crops
-
-                    for target_class in classes_to_plot:
-                        prefix = 'global_step_{}_class_{}/'.format(global_step, target_class)
-                        model.write_image_summary(prefix + 'image', X_test * channels_std + channels_mean)
-
-                        Y_true_class = np.expand_dims(Y_test[:,:,:,target_class-1], 3)
-                        Y_pred_class = np.expand_dims(Y_pred[:,:,:,target_class-1], 3)
-                        model.write_image_summary(prefix + 'true', Y_true_class)
-                        model.write_image_summary(prefix + 'pred', Y_pred_class)
-
-                    model_name = os.path.join(MODELS_DIR, 'simple_model')
-                    saved_filaname = model.save_model(model_name, global_step=global_step)
-                    logging.info('Model saved: %s', saved_filaname)
-
-            except KeyboardInterrupt:
-                break
-
-
+        except KeyboardInterrupt:
+            break
 
 
 def predict():
@@ -240,7 +206,6 @@ def predict():
     # images_test = images_test[:10]
     nb_test_images = len(images_test)
     logging.info('Test images: %s', nb_test_images)
-
 
     patch_size = (256, 256)
     nb_channels = 3
@@ -286,6 +251,7 @@ def predict():
 
         if (i + 1) % 10 == 0:
             logging.info('Predicted: %s/%s [%.2f]', i, nb_test_images, 100 * i / nb_test_images)
+
 
 if __name__ == '__main__':
     task = 'main'
