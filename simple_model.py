@@ -147,7 +147,7 @@ def main():
     sess = tf.Session(config=sess_config)
 
     model_params = {
-        'nb_classes': nb_classes
+        'nb_classes': nb_classes,
     }
     model = SimpleModel(**model_params)
     model.set_session(sess)
@@ -203,7 +203,6 @@ def predict():
     images_all = list(images_metadata.keys())
     images_train = list(images_metadata_polygons.keys())
     images_test = sorted(set(images_all) - set(images_train))
-    # images_test = images_test[:10]
     nb_test_images = len(images_test)
     logging.info('Test images: %s', nb_test_images)
 
@@ -217,23 +216,24 @@ def predict():
     sess = tf.Session(config=sess_config)
 
     model_params = {
-
+        'nb_classes': nb_classes,
     }
     model = SimpleModel(**model_params)
     model.set_session(sess)
-    model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model'))
+    # model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model'))
 
     # TODO: not a fixed size
     model.add_input('X', [patch_size[0], patch_size[0], nb_channels])
-    model.add_input('Y', [patch_size[0], patch_size[0], nb_classes])
+    model.add_input('Y', [patch_size[0], patch_size[1], ], dtype=tf.uint8)
 
     model.build_model()
 
-    model_filename = os.path.join(MODELS_DIR, 'simple_model-91')
+    model_to_restore = 'simple_model-1125'
+    model_filename = os.path.join(MODELS_DIR, model_to_restore)
     model.restore_model(model_filename)
     logging.info('Model restored: %s', os.path.basename(model_filename))
 
-    for i, img_id in enumerate(images_test):
+    for img_number, img_id in enumerate(images_test):
         img_filename = os.path.join(IMAGES_TEST_NORMALIZED_DATA_DIR, img_id + '.npy')
         img_data = np.load(img_filename)
 
@@ -242,15 +242,24 @@ def predict():
         X = np.array(patches)
         data_dict = {'X': X}
         classes_prob = model.predict(data_dict)
-        mask_patches = np.round(np.array(classes_prob)).astype(np.uint8)
+        classes_prob_joined = join_patches_to_image(np.array(classes_prob), patches_coord, img_data.shape[0], img_data.shape[1])
+        classes_idx = np.argmax(classes_prob_joined, axis=-1)
 
-        mask_joined = join_patches_to_image(mask_patches, patches_coord, img_data.shape[0], img_data.shape[1])
+        # convert from softmax to classes mask
+        # TODO: multithreading goes here, using a batch of images
+        masks = []
+        for i in range(1, nb_classes + 1):
+            m = np.zeros((img_data.shape[0], img_data.shape[1]), dtype=np.uint8)
+            m[np.where(classes_idx == i)] = 1
+            masks.append(m)
+
+        mask_joined = np.stack(masks, axis=-1)
 
         mask_filename = os.path.join(IMAGES_TEST_PREDICTION_MASK_DIR, img_id + '.npy')
         np.save(mask_filename, mask_joined)
 
-        if (i + 1) % 10 == 0:
-            logging.info('Predicted: %s/%s [%.2f]', i, nb_test_images, 100 * i / nb_test_images)
+        if (img_number + 1) % 2 == 0:
+            logging.info('Predicted: %s/%s [%.2f]', img_number+1, nb_test_images, 100 * (img_number+1) / nb_test_images)
 
 
 if __name__ == '__main__':

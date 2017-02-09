@@ -4,6 +4,7 @@ import cv2
 import shapely
 import shapely.wkt
 import shapely.affinity
+from shapely.geometry import MultiPolygon, Polygon
 import rasterio
 import rasterio.features
 import numpy as np
@@ -73,11 +74,9 @@ def join_patches_to_image(patches, patches_coord, image_height, image_width):
     return image_data
 
 
-def mask_to_polygons(mask, epsilon=5, min_area=1.):
+def mask_to_polygons(mask, epsilon=5, min_area=1.0):
     # __author__ = Konstantin Lopuhin
     # https://www.kaggle.com/lopuhin/dstl-satellite-imagery-feature-detection/full-pipeline-demo-poly-pixels-ml-poly
-
-    from shapely.geometry import MultiPolygon, Polygon
 
     # first, find contours with cv2: it's much faster than shapely
     image, contours, hierarchy = cv2.findContours(
@@ -124,7 +123,7 @@ def create_polygons_from_mask(mask, image_metadata):
     # for shp in shapes:
     #     a = 'zzz'
 
-    poly = mask_to_polygons(mask)
+    poly = mask_to_polygons(mask, min_area=500.0)
 
     poly = poly.buffer(-0.001).buffer(0.001)
 

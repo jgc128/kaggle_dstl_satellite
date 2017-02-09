@@ -53,7 +53,7 @@ def main():
                 img_id = ''
 
         if img_mask_data is not None:
-            mask = img_mask_data[:, :, target_class_id]
+            mask = img_mask_data[target_class_id, :, :]
 
             poly = create_polygons_from_mask(mask, images_metadata[img_id])
             submission.append((img_id, target_class, poly.wkt))
@@ -61,7 +61,7 @@ def main():
             submission.append((img_id, target_class, 'MULTIPOLYGON EMPTY'))
 
         if (i + 1) % 10 == 0:
-            logging.info('Processed: %s/%s [%.2f]', i, len(sample_submission), 100 * i / len(sample_submission))
+            logging.info('Processed: %s/%s [%.2f]', i + 1, len(sample_submission), 100 * (i + 1) / len(sample_submission))
 
     save_submission(submission, os.path.join(SUBMISSION_DIR, 'simple_model_submission.csv'))
 
