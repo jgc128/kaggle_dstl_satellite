@@ -14,7 +14,7 @@ from tensorflow_helpers.utils.data import batch_generator
 from calc_class_intersection import get_intersection_area
 from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle, convert_mask_to_one_hot, \
     convert_softmax_to_masks
-from utils.matplotlib import matplotlib_setup, plot_mask, plot_image, plot_test_predictions
+from utils.matplotlib import matplotlib_setup
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR, \
     IMAGES_METADATA_FILENAME, TRAIN_PATCHES_COORDINATES_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
     IMAGES_NORMALIZED_DATA_DIR, IMAGES_PREDICTION_MASK_DIR
