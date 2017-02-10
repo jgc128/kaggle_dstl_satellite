@@ -9,7 +9,7 @@ import numpy as np
 from utils.data import load_pickle, load_images
 from utils.matplotlib import matplotlib_setup
 from config import IMAGES_METADATA_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, IMAGES_THREE_BAND_DIR, \
-    IMAGES_TEST_NORMALIZED_DATA_DIR
+    IMAGES_NORMALIZED_DATA_DIR
 
 
 def main():
@@ -33,13 +33,15 @@ def main():
     logging.info('Train: %s, test: %s, all: %s', len(images_train), len(images_test), len(images_all))
 
     # let's try to read all images!
-    images_data = load_images(IMAGES_THREE_BAND_DIR, target_images=images_test)
+    images_data = load_images(IMAGES_THREE_BAND_DIR, target_images=images_all)
 
     for i, (img_id, img_data) in enumerate(images_data.items()):
         img_normalized = ((img_data - channels_mean) / channels_std).astype(np.float32)
-        img_filename = os.path.join(IMAGES_TEST_NORMALIZED_DATA_DIR, img_id + '.npy')
+        img_filename = os.path.join(IMAGES_NORMALIZED_DATA_DIR, img_id + '.npy')
         np.save(img_filename, img_normalized)
 
+        if (i + 1) % 50 == 0:
+            logging.info('Processed: %s/%s [%.2f]', (i+1), len(images_data), 100 * (i + 1) / len(images_data))
 
 
 if __name__ == '__main__':

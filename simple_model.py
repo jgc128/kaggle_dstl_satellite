@@ -17,7 +17,7 @@ from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle,
 from utils.matplotlib import matplotlib_setup, plot_mask, plot_image, plot_test_predictions
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR, \
     IMAGES_METADATA_FILENAME, TRAIN_PATCHES_COORDINATES_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
-    IMAGES_TEST_NORMALIZED_DATA_DIR, IMAGES_TEST_PREDICTION_MASK_DIR
+    IMAGES_NORMALIZED_DATA_DIR, IMAGES_PREDICTION_MASK_DIR
 
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
 # https://github.com/shekkizh/FCN.tensorflow
@@ -146,7 +146,7 @@ def main():
     nb_channels = images_data[images[0]].shape[2]
     logging.info('Classes: %s, channels: %s', nb_classes, nb_channels)
 
-    patch_size = (128, 128,)
+    patch_size = (256, 256,)
     val_size = 256
     logging.info('Patch size: %s, validation size: %s', patch_size, val_size)
 
@@ -170,7 +170,7 @@ def main():
     # train model
 
     nb_iterations = 100000
-    nb_samples_train = 10000
+    nb_samples_train = 1000
     nb_samples_val = 256
     batch_size = 40
 
@@ -210,7 +210,7 @@ def main():
 
                 jaccard_train_val = jaccard_coef(Y_train_val_pred, Y_train_val)
 
-                logging.info('Iteration %s, jaccard val: %s, jaccard train: %s',
+                logging.info('Iteration %s, jaccard val: %.5f, jaccard train: %.5f',
                              iteration_number, jaccard_val, jaccard_train_val)
 
                 model.write_scalar_summary('jaccard/val', jaccard_val)
@@ -226,14 +226,14 @@ def main():
             break
 
 
-def predict():
+def predict(kind):
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s : %(levelname)s : %(module)s : %(message)s", datefmt="%d-%m-%Y %H:%M:%S"
     )
 
     matplotlib_setup()
 
-    logging.info('Prediction')
+    logging.info('Prediction mode')
 
     # load images metadata
     images_metadata, channels_mean, channels_std = load_pickle(IMAGES_METADATA_FILENAME)
@@ -246,8 +246,16 @@ def predict():
     images_all = list(images_metadata.keys())
     images_train = list(images_metadata_polygons.keys())
     images_test = sorted(set(images_all) - set(images_train))
-    nb_test_images = len(images_test)
-    logging.info('Test images: %s', nb_test_images)
+
+    if kind == 'test':
+        target_images = images_test
+    elif kind == 'train':
+        target_images = images_train
+    else:
+        raise ValueError('Unknown kind: {}'.format(kind))
+
+    nb_target_images = len(target_images)
+    logging.info('Target images: %s - %s', kind, nb_target_images)
 
     patch_size = (256, 256)
     nb_channels = 3
@@ -271,13 +279,13 @@ def predict():
 
     model.build_model()
 
-    model_to_restore = 'simple_model-1125'
+    model_to_restore = 'simple_model-18375'
     model_filename = os.path.join(MODELS_DIR, model_to_restore)
     model.restore_model(model_filename)
     logging.info('Model restored: %s', os.path.basename(model_filename))
 
-    for img_number, img_id in enumerate(images_test):
-        img_filename = os.path.join(IMAGES_TEST_NORMALIZED_DATA_DIR, img_id + '.npy')
+    for img_number, img_id in enumerate(target_images):
+        img_filename = os.path.join(IMAGES_NORMALIZED_DATA_DIR, img_id + '.npy')
         img_data = np.load(img_filename)
 
         patches, patches_coord = split_image_to_patches(img_data, patch_size)
@@ -288,25 +296,14 @@ def predict():
         classes_prob_joined = join_patches_to_image(np.array(classes_prob), patches_coord, img_data.shape[0],
                                                     img_data.shape[1])
 
-        # classes_idx = np.argmax(classes_prob_joined, axis=-1)
-        #
-        # # convert from softmax to classes mask
-        # # TODO: multithreading goes here, using a batch of images
-        # masks = []
-        # for i in range(1, nb_classes + 1):
-        #     m = np.zeros((img_data.shape[0], img_data.shape[1]), dtype=np.uint8)
-        #     m[np.where(classes_idx == i)] = 1
-        #     masks.append(m)
-        #
-        # mask_joined = np.stack(masks, axis=-1)
-        # TODO: call convert_softmax_to_masks
+        masks = convert_softmax_to_masks(classes_prob_joined)
 
-        mask_filename = os.path.join(IMAGES_TEST_PREDICTION_MASK_DIR, img_id + '.npy')
-        np.save(mask_filename, mask_joined)
+        mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, img_id + '.npy')
+        np.save(mask_filename, masks)
 
         if (img_number + 1) % 2 == 0:
-            logging.info('Predicted: %s/%s [%.2f]', img_number + 1, nb_test_images,
-                         100 * (img_number + 1) / nb_test_images)
+            logging.info('Predicted: %s/%s [%.2f]',
+                         img_number + 1, nb_target_images, 100 * (img_number + 1) / nb_target_images)
 
 
 if __name__ == '__main__':
@@ -316,7 +313,10 @@ if __name__ == '__main__':
         task = sys.argv[1]
 
     if task == 'predict':
-        predict()
+        kind = 'test'
+        if len(sys.argv) > 2:
+            kind = sys.argv[2]
+        predict(kind)
 
     if task == 'main':
         main()

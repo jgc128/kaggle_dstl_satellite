@@ -66,8 +66,13 @@ def load_images(directory, target_images=None):
     images_filenames, target_images = _get_images_filenames(directory, target_images)
 
     # transpose to get the (height, width, channels) shape
-    images_data = {image_id: tiff.imread(images_filenames[i]).transpose([1, 2, 0]) for i, image_id in
-                   enumerate(target_images)}
+    images_data = {}
+    for i, img_id in enumerate(target_images):
+        img_data = tiff.imread(images_filenames[i]).transpose([1, 2, 0])
+        images_data[img_id] = img_data
+
+        if (i + 1) % 10 == 0:
+            logging.info('Loaded: %s/%s [%.2f]', (i + 1), len(target_images), 100 * (i + 1) / len(target_images))
 
     logging.info('Images data: %s', len(images_data))
     return images_data
