@@ -101,3 +101,20 @@ def convert_mask_to_one_hot(Y):
     Y_one_hot = Y_one_hot.argmax(axis=-1)
 
     return Y_one_hot
+
+
+def convert_softmax_to_masks(Y_probs):
+    nb_classes = Y_probs.shape[2] - 1
+    mask_height = Y_probs.shape[0]
+    mask_width = Y_probs.shape[1]
+
+    Y_classes = np.argmax(Y_probs, axis=-1)
+
+    masks = []
+    for i in range(1, nb_classes + 1):
+        m = np.zeros((mask_height, mask_width), dtype=np.uint8)
+        m[np.where(Y_classes == i)] = 1
+        masks.append(m)
+
+    mask_joined = np.stack(masks, axis=-1)
+    return mask_joined

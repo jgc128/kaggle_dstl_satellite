@@ -53,7 +53,7 @@ def plot_test_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std, s
         ax_true = axes[j, 1]
         ax_pred = axes[j, 2]
 
-        X_test_sacled = bytescale(X_test[j] * channels_std + channels_mean, low=0, high=255)
+        X_test_sacled = bytescale(X_test[j] * channels_std + channels_mean, low=0, high=2047, cmin=0, cmax=2047)
 
         ax_img.imshow(X_test_sacled, interpolation='none')
         ax_true.imshow(Y_true[j], interpolation='none', cmap='gray')

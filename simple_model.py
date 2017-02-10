@@ -11,7 +11,9 @@ from random import shuffle
 from tensorflow_helpers.models.base_model import BaseModel
 from tensorflow_helpers.utils.data import batch_generator
 
-from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle, convert_mask_to_one_hot
+from calc_class_intersection import get_intersection_area
+from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle, convert_mask_to_one_hot, \
+    convert_softmax_to_masks
 from utils.matplotlib import matplotlib_setup, plot_mask, plot_image, plot_test_predictions
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR, \
     IMAGES_METADATA_FILENAME, TRAIN_PATCHES_COORDINATES_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
@@ -20,7 +22,7 @@ from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DI
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
 # https://github.com/shekkizh/FCN.tensorflow
 # https://github.com/warmspringwinds/tf-image-segmentation
-from utils.polygon import split_image_to_patches, join_patches_to_image, sample_patches_batch
+from utils.polygon import split_image_to_patches, join_patches_to_image, sample_patches, jaccard_coef
 
 
 class SimpleModel(BaseModel):
@@ -108,6 +110,11 @@ class SimpleModel(BaseModel):
             summary_res = self.sess.run(summary_op)
             self.log_writer.add_summary(summary_res, self._global_step)
 
+    def write_scalar_summary(self, tag, value):
+        if self.log_writer is not None:
+            summary = tf.Summary(value=[tf.Summary.Value(tag=tag, simple_value=float(value)), ])
+            self.log_writer.add_summary(summary, self._global_step)
+
 
 def main():
     logging.basicConfig(
@@ -139,8 +146,9 @@ def main():
     nb_channels = images_data[images[0]].shape[2]
     logging.info('Classes: %s, channels: %s', nb_classes, nb_channels)
 
-    patch_size = (256, 256,)
-    logging.info('Patch size: %s', patch_size)
+    patch_size = (128, 128,)
+    val_size = 256
+    logging.info('Patch size: %s, validation size: %s', patch_size, val_size)
 
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
     sess_config.gpu_options.allow_growth = True
@@ -162,21 +170,56 @@ def main():
     # train model
 
     nb_iterations = 100000
-    sample_size = 1000
+    nb_samples_train = 10000
+    nb_samples_val = 256
     batch_size = 40
-    nb_test_images = 3
 
     for iteration_number in range(1, nb_iterations + 1):
         try:
-            X, Y = sample_patches_batch(images, images_data, images_masks_stacked, patch_size, sample_size)
+            X, Y = sample_patches(images, images_data, images_masks_stacked, patch_size, nb_samples_train,
+                                  kind='train', val_size=val_size)
             Y_one_hot = convert_mask_to_one_hot(Y)
 
             data_dict_train = {'X': X, 'Y': Y_one_hot}
             model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
 
+            # validate the model
+            if iteration_number % 5 == 0:
+                X_val, Y_val = sample_patches(images, images_data, images_masks_stacked, patch_size, nb_samples_val,
+                                              kind='val', val_size=val_size)
+
+                data_dict_val = {'X': X_val}
+                Y_val_pred_probs = model.predict(data_dict_val, batch_size=batch_size)
+                Y_val_pred_probs = np.array(Y_val_pred_probs)
+
+                Y_val_pred = np.array([convert_softmax_to_masks(Y_val_pred_probs[i])
+                                       for i in range(len(Y_val_pred_probs))])
+
+                jaccard_val = jaccard_coef(Y_val_pred, Y_val)
+
+                X_train_val, Y_train_val = sample_patches(images, images_data, images_masks_stacked, patch_size,
+                                                          nb_samples_val,
+                                                          kind='train', val_size=val_size)
+
+                data_dict_train_val = {'X': X_train_val}
+                Y_train_val_pred_probs = model.predict(data_dict_train_val, batch_size=batch_size)
+                Y_train_val_pred_probs = np.array(Y_train_val_pred_probs)
+
+                Y_train_val_pred = np.array([convert_softmax_to_masks(Y_train_val_pred_probs[i])
+                                             for i in range(len(Y_train_val_pred_probs))])
+
+                jaccard_train_val = jaccard_coef(Y_train_val_pred, Y_train_val)
+
+                logging.info('Iteration %s, jaccard val: %s, jaccard train: %s',
+                             iteration_number, jaccard_val, jaccard_train_val)
+
+                model.write_scalar_summary('jaccard/val', jaccard_val)
+                model.write_scalar_summary('jaccard/train', jaccard_train_val)
+
+            # save the model
             if iteration_number % 15 == 0:
                 model_name = os.path.join(MODELS_DIR, 'simple_model')
-                saved_filename = model.save_model(model_name, global_step=iteration_number)
+                saved_filename = model.save_model(model_name)
                 logging.info('Model saved: %s', saved_filename)
 
         except KeyboardInterrupt:
@@ -242,24 +285,28 @@ def predict():
         X = np.array(patches)
         data_dict = {'X': X}
         classes_prob = model.predict(data_dict)
-        classes_prob_joined = join_patches_to_image(np.array(classes_prob), patches_coord, img_data.shape[0], img_data.shape[1])
-        classes_idx = np.argmax(classes_prob_joined, axis=-1)
+        classes_prob_joined = join_patches_to_image(np.array(classes_prob), patches_coord, img_data.shape[0],
+                                                    img_data.shape[1])
 
-        # convert from softmax to classes mask
-        # TODO: multithreading goes here, using a batch of images
-        masks = []
-        for i in range(1, nb_classes + 1):
-            m = np.zeros((img_data.shape[0], img_data.shape[1]), dtype=np.uint8)
-            m[np.where(classes_idx == i)] = 1
-            masks.append(m)
-
-        mask_joined = np.stack(masks, axis=-1)
+        # classes_idx = np.argmax(classes_prob_joined, axis=-1)
+        #
+        # # convert from softmax to classes mask
+        # # TODO: multithreading goes here, using a batch of images
+        # masks = []
+        # for i in range(1, nb_classes + 1):
+        #     m = np.zeros((img_data.shape[0], img_data.shape[1]), dtype=np.uint8)
+        #     m[np.where(classes_idx == i)] = 1
+        #     masks.append(m)
+        #
+        # mask_joined = np.stack(masks, axis=-1)
+        # TODO: call convert_softmax_to_masks
 
         mask_filename = os.path.join(IMAGES_TEST_PREDICTION_MASK_DIR, img_id + '.npy')
         np.save(mask_filename, mask_joined)
 
         if (img_number + 1) % 2 == 0:
-            logging.info('Predicted: %s/%s [%.2f]', img_number+1, nb_test_images, 100 * (img_number+1) / nb_test_images)
+            logging.info('Predicted: %s/%s [%.2f]', img_number + 1, nb_test_images,
+                         100 * (img_number + 1) / nb_test_images)
 
 
 if __name__ == '__main__':

@@ -134,13 +134,26 @@ def create_polygons_from_mask(mask, image_metadata):
     return poly_scaled
 
 
-def sample_patch(img_data, img_mask_data, patch_size):
+def sample_patch(img_data, img_mask_data, patch_size, kind='train', val_size = 256):
     img_height = img_mask_data.shape[0]
     img_width = img_mask_data.shape[1]
 
+    if kind == 'train':
+        min_height = 0
+        min_width = val_size
+        max_height = img_height - patch_size[0]
+        max_width = img_width - patch_size[1]
+    elif kind == 'val':
+        min_height = 0
+        min_width = 0
+        max_height = img_height - patch_size[0]
+        max_width = val_size
+    else:
+        raise ValueError('Kind {} is not valid'.format(kind))
+
     img_c1 = (
-        np.random.randint(0, img_height - patch_size[0]),
-        np.random.randint(0, img_width - patch_size[1])
+        np.random.randint(min_height, max_height),
+        np.random.randint(min_width, max_width)
     )
     img_c2 = (img_c1[0] + patch_size[0], img_c1[1] + patch_size[1])
 
@@ -150,21 +163,36 @@ def sample_patch(img_data, img_mask_data, patch_size):
     return img_patch, img_mask
 
 
-def sample_patches_batch(images, images_data, images_masks_stacked, patch_size, sample_size):
+def sample_patches(images, images_data, images_masks_stacked, patch_size, nb_samples, kind='train', val_size = 256):
     nb_channels = images_data[images[0]].shape[2]
     nb_classes = images_masks_stacked[images[0]].shape[2]
 
-    X = np.zeros((sample_size, patch_size[0], patch_size[1], nb_channels))
-    Y = np.zeros((sample_size, patch_size[0], patch_size[1], nb_classes), dtype=np.uint8)
+    X = np.zeros((nb_samples, patch_size[0], patch_size[1], nb_channels))
+    Y = np.zeros((nb_samples, patch_size[0], patch_size[1], nb_classes), dtype=np.uint8)
 
-    for i in range(sample_size):
+    for i in range(nb_samples):
         img_id = np.random.choice(images)
         img_data = images_data[img_id]
         img_mask_data = images_masks_stacked[img_id]
 
-        img_patch, img_mask = sample_patch(img_data, img_mask_data, patch_size)
+        img_patch, img_mask = sample_patch(img_data, img_mask_data, patch_size, kind=kind, val_size=val_size)
 
         X[i] = img_patch
         Y[i] = img_mask
 
     return X, Y
+
+
+def jaccard_coef(y_pred, y_true):
+    # inspired by https://www.kaggle.com/drn01z3/dstl-satellite-imagery-feature-detection/end-to-end-baseline-with-u-net-keras
+
+    epsilon = 0.00001
+
+    intersection = np.sum(y_pred * y_true, axis=(0,1,2))
+    sum_tmp = np.sum(y_pred + y_true, axis=(0,1,2))
+    union = sum_tmp - intersection
+
+    jaccard = (intersection + epsilon) / (union + epsilon)
+    jaccard_mean = np.mean(jaccard)
+
+    return jaccard_mean
