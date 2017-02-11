@@ -81,6 +81,9 @@ def plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true=None, tit
     ax_pred.set_ylim(0, img_metadata['height'])
     ax_pred.set_axis_off()
 
+    for ax, ax_title in zip(axes, ['Ground Truth', 'Predicted', ]):
+        ax.set_title(ax_title)
+
     if title is not None:
         fig.suptitle(title)
 
