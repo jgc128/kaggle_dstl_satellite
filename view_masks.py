@@ -6,8 +6,10 @@ import numpy as np
 from config import IMAGES_METADATA_FILENAME, IMAGES_PREDICTION_MASK_DIR, IMAGES_NORMALIZED_FILENAME, \
     IMAGES_MASKS_FILENAME
 from config import IMAGES_METADATA_POLYGONS_FILENAME
+from create_submission import create_image_polygons
 from utils.data import load_pickle
-from utils.matplotlib import matplotlib_setup, plot_masks_predictions
+from utils.matplotlib import matplotlib_setup, plot_image, plot_polygons
+from utils.polygon import jaccard_coef
 
 
 def main(kind):
@@ -58,12 +60,21 @@ def main(kind):
             logging.warning('Cannot find masks for image: %s', img_id)
             continue
 
-        Y_pred = np.load(mask_filename)
-        Y_true = images_masks_stacked[img_id]
-        X_test = images_data[img_id]
-        plot_masks_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std)
+        img_data = images_data[img_id] * channels_std + channels_mean
+        img_metadata = images_metadata[img_id]
+        img_poly_true = images_metadata_polygons[img_id]
+        img_mask_true = images_masks_stacked[img_id]
+        img_mask_pred = np.load(mask_filename)
+
+        jaccard = jaccard_coef(img_mask_pred, img_mask_true)
+        logging.info('Image: %s, jaccard: %s', img_id, jaccard)
+
+        img_poly_pred = create_image_polygons(img_mask_true, img_metadata, scale=False)
+        plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true, show=False, title=img_id)
 
 
+    import matplotlib.pyplot as plt
+    plt.show()
 
 if __name__ == '__main__':
     kind = 'train'

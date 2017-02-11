@@ -32,14 +32,14 @@ def save_submission(polygons, submission_order, filename):
     logging.info('Submission saved: %s', os.path.basename(filename))
 
 
-def create_image_polygons(img_masks, img_metadata):
+def create_image_polygons(img_masks, img_metadata, scale=True):
     if img_masks is None:
         return {}
 
     nb_classes = img_masks.shape[2]
 
     polygons = Parallel(n_jobs=4)(
-        delayed(create_polygons_from_mask)(img_masks[:, :, class_id], img_metadata) for class_id in range(nb_classes)
+        delayed(create_polygons_from_mask)(img_masks[:, :, class_id], img_metadata, scale) for class_id in range(nb_classes)
     )
 
     polygons_dict = {class_id+1:polygons[class_id] for class_id in range(nb_classes)}
@@ -72,7 +72,7 @@ def main():
         else:
             img_mask = None
 
-        img_polygons = create_image_polygons(img_mask, img_metadata)
+        img_polygons = create_image_polygons(img_mask, img_metadata, scale=True)
         polygons[img_id] = img_polygons
 
         if (i + 1) % 10 == 0:

@@ -17,6 +17,8 @@ import numpy as np
 #     polygons = shapely.wkt.loads(poly).buffer(0.00001)
 #     return shapely.wkt.dumps(polygons)
 
+
+
 def round_coords(coords):
     return np.array(coords).round().astype(np.int32)
 
@@ -122,7 +124,7 @@ def mask_to_polygons(mask, epsilon=5, min_area=1.0):
         return MultiPolygon()
 
 
-def create_polygons_from_mask(mask, image_metadata):
+def create_polygons_from_mask(mask, image_metadata, scale=True):
     # shapes = rasterio.features.shapes(mask)
     # for shp in shapes:
     #     a = 'zzz'
@@ -130,12 +132,12 @@ def create_polygons_from_mask(mask, image_metadata):
     poly = mask_to_polygons(mask, min_area=1.0)
 
     # poly = poly.buffer(-0.001).buffer(0.001)
+    if scale:
+        x_scaler = image_metadata['x_scaler']
+        y_scaler = image_metadata['y_scaler']
+        poly = shapely.affinity.scale(poly, xfact=1.0 / x_scaler, yfact=1.0 / y_scaler, origin=(0, 0, 0))
 
-    x_scaler = image_metadata['x_scaler']
-    y_scaler = image_metadata['y_scaler']
-    poly_scaled = shapely.affinity.scale(poly, xfact=1.0 / x_scaler, yfact=1.0 / y_scaler, origin=(0, 0, 0))
-
-    return poly_scaled
+    return poly
 
 
 def sample_patch(img_data, img_mask_data, patch_size, kind='train', val_size = 256):
@@ -187,7 +189,7 @@ def sample_patches(images, images_data, images_masks_stacked, patch_size, nb_sam
     return X, Y
 
 
-def jaccard_coef(y_pred, y_true):
+def jaccard_coef(y_pred, y_true, mean=True):
     # inspired by https://www.kaggle.com/drn01z3/dstl-satellite-imagery-feature-detection/end-to-end-baseline-with-u-net-keras
 
     epsilon = 0.00001

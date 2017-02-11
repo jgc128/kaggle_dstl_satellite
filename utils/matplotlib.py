@@ -1,6 +1,10 @@
 import os
 import logging
 
+import shapely
+import shapely.wkt
+import shapely.affinity
+
 import numpy as np
 from scipy.misc import bytescale
 
@@ -42,43 +46,79 @@ def plot_mask(mask_data, figure=None, subplot=111):
     plt.show()
 
 
-def plot_masks_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std, show=True, title=None, filename=None):
+def plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true=None, title=None, show=True):
     import matplotlib.pyplot as plt
 
-    nb_classes = Y_pred.shape[2]
-    not_zero_classes = [i for i in range(nb_classes) if Y_pred[:,:,i].sum() > 0]
-    nb_not_zero_classes = len(not_zero_classes)
-    logging.info('Classes: %s, not zero classes: %s', nb_classes, nb_not_zero_classes)
+    img_data_scaled = bytescale(img_data, low=0, high=255, cmin=0, cmax=2047)
 
-    fig, axes = plt.subplots(3, nb_not_zero_classes, figsize=(20, 50))
-    X_test_sacled = bytescale(X_test * channels_std + channels_mean, low=0, high=255, cmin=0, cmax=2047)
+    if isinstance(img_poly_pred[list(img_poly_pred.keys())[0]], str):
+        img_poly_pred = {i: shapely.wkt.loads(p) for i, p in img_poly_pred.items()}
 
-    for i, class_idx in enumerate(not_zero_classes):
-        ax_img = axes[0, i]
-        ax_true = axes[1, i]
-        ax_pred = axes[2, i]
+    img_poly_true = {i: shapely.wkt.loads(p['ploy_scaled']) for i, p in img_poly_true.items()}
 
-        ax_img.imshow(X_test_sacled, interpolation='none')
-        ax_true.imshow(Y_true[:,:,class_idx], interpolation='none', cmap='gray')
-        ax_pred.imshow(Y_pred[:,:,class_idx], interpolation='none', cmap='gray')
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
 
-    for ax in axes.flatten():
-        ax.set_axis_off()
+    ax_true = axes[0]
+    ax_pred = axes[1]
 
-    # for ax, ax_title in zip(axes[0], ['Image', 'Ground Truth', 'Prediction', ]):
-    #     ax.set_title(ax_title)
-    #
+    # plot images
+    ax_true.imshow(img_data_scaled, interpolation='none')
+    ax_pred.imshow(img_data_scaled, interpolation='none')
+
+    # plot polygons
+    plt_patches_pred = create_matplotlib_patches_from_polygons(img_poly_pred)
+    ax_pred.add_collection(plt_patches_pred)
+
+    plt_patches_true = create_matplotlib_patches_from_polygons(img_poly_true)
+    ax_true.add_collection(plt_patches_true)
+
+    # set attributes
+    ax_true.set_xlim(0, img_metadata['width'])
+    ax_true.set_ylim(0, img_metadata['height'])
+    ax_true.set_axis_off()
+
+    ax_pred.set_xlim(0, img_metadata['width'])
+    ax_pred.set_ylim(0, img_metadata['height'])
+    ax_pred.set_axis_off()
+
     if title is not None:
         fig.suptitle(title)
-    fig.tight_layout() # pad=2
+
+    plt.tight_layout()
 
     if show:
         plt.show()
 
-    if filename is not None:
-        plt.savefig(filename)
-        logging.info('Image saved: %s', os.path.basename(filename))
 
+def create_matplotlib_patches_from_polygons(img_poly):
+    from matplotlib.path import Path
+    import matplotlib.patches as patches
+    from matplotlib.collections import PatchCollection
+    import seaborn as sns
 
-def plot_polygons(img_data, polygons):
-    pass
+    int_coords = lambda x: np.array(x).round().astype(np.int32)
+
+    class_colormap = sns.color_palette('deep', len(img_poly.keys()))
+
+    plt_polygons = []
+    plt_colors = []
+    for class_type in sorted(img_poly.keys()):
+        multipoly = img_poly[class_type]
+
+        exteriors = [int_coords(poly.exterior.coords) for poly in multipoly]
+        interiors = [int_coords(pi.coords) for poly in multipoly for pi in poly.interiors]
+        for poly in exteriors:
+            plt_poly = patches.Polygon(poly, closed=True)
+            plt_polygons.append(plt_poly)
+            plt_colors.append(class_colormap[class_type - 1])
+
+            # for poly in interiors:
+            #     plt_poly = patches.Polygon(poly, closed=True)
+            #     plt_polygons.append(plt_poly)
+            #     plt_colors.append('red')
+            #
+            # break
+
+    plt_patches = PatchCollection(plt_polygons, facecolors=plt_colors)
+
+    return plt_patches
