@@ -43,7 +43,8 @@ class SimpleModel(BaseModel):
         # VGG-16
         batch_norm_params = {'is_training': self.is_train, 'decay': 0.999, 'updates_collections': None}
         with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
-                            normalizer_fn=slim.batch_norm, normalizer_params=batch_norm_params):
+                            normalizer_fn=slim.batch_norm, normalizer_params=batch_norm_params,
+                            weights_regularizer=slim.l2_regularizer(0.05)):
             net = slim.conv2d(net, 64, [3, 3], scope='conv1_1')
             net = slim.conv2d(net, 64, [3, 3], scope='conv1_2')
             net = slim.max_pool2d(net, [2, 2], scope='pool1_1')
@@ -100,7 +101,8 @@ class SimpleModel(BaseModel):
             cross_entropy = tf.nn.softmax_cross_entropy_with_logits(net, targets_one_hot)
             loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1, 2]))
 
-            self.op_loss = loss
+            slim.losses.add_loss(loss)
+            self.op_loss = slim.losses.get_total_loss(add_regularization_losses=True)
 
     def write_image_summary(self, name, image, nb_test_images=3):
         if self.log_writer is not None:
@@ -159,7 +161,7 @@ def main():
     }
     model = SimpleModel(**model_params)
     model.set_session(sess)
-    model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model'))
+    model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model_reg'))
 
     # TODO: not a fixed size
     model.add_input('X', [patch_size[0], patch_size[1], nb_channels])
@@ -171,7 +173,7 @@ def main():
 
     nb_iterations = 100000
     nb_samples_train = 1000
-    nb_samples_val = 256
+    nb_samples_val = 512
     batch_size = 40
 
     for iteration_number in range(1, nb_iterations + 1):
@@ -218,7 +220,7 @@ def main():
 
             # save the model
             if iteration_number % 15 == 0:
-                model_name = os.path.join(MODELS_DIR, 'simple_model')
+                model_name = os.path.join(MODELS_DIR, 'simple_model_reg')
                 saved_filename = model.save_model(model_name)
                 logging.info('Model saved: %s', saved_filename)
 
@@ -279,7 +281,7 @@ def predict(kind):
 
     model.build_model()
 
-    model_to_restore = 'simple_model-18375'
+    model_to_restore = 'simple_model_reg-27750'
     model_filename = os.path.join(MODELS_DIR, model_to_restore)
     model.restore_model(model_filename)
     logging.info('Model restored: %s', os.path.basename(model_filename))

@@ -115,7 +115,11 @@ def mask_to_polygons(mask, epsilon=5, min_area=1.0):
         # need to keep it a Multi throughout
         if all_polygons.type == 'Polygon':
             all_polygons = MultiPolygon([all_polygons])
-    return all_polygons
+
+    if all_polygons.is_valid:
+        return all_polygons
+    else:
+        return MultiPolygon()
 
 
 def create_polygons_from_mask(mask, image_metadata):
@@ -123,9 +127,9 @@ def create_polygons_from_mask(mask, image_metadata):
     # for shp in shapes:
     #     a = 'zzz'
 
-    poly = mask_to_polygons(mask, min_area=500.0)
+    poly = mask_to_polygons(mask, min_area=1.0)
 
-    poly = poly.buffer(-0.001).buffer(0.001)
+    # poly = poly.buffer(-0.001).buffer(0.001)
 
     x_scaler = image_metadata['x_scaler']
     y_scaler = image_metadata['y_scaler']

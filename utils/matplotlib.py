@@ -45,16 +45,18 @@ def plot_mask(mask_data, figure=None, subplot=111):
 def plot_masks_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std, show=True, title=None, filename=None):
     import matplotlib.pyplot as plt
 
-    nb_classes = Y_true.shape[2]
+    nb_classes = Y_pred.shape[2]
+    not_zero_classes = [i for i in range(nb_classes) if Y_pred[:,:,i].sum() > 0]
+    nb_not_zero_classes = len(not_zero_classes)
+    logging.info('Classes: %s, not zero classes: %s', nb_classes, nb_not_zero_classes)
 
-    fig, axes = plt.subplots(3, nb_classes, figsize=(20, 50))
+    fig, axes = plt.subplots(3, nb_not_zero_classes, figsize=(20, 50))
     X_test_sacled = bytescale(X_test * channels_std + channels_mean, low=0, high=255, cmin=0, cmax=2047)
 
-    for class_idx in range(nb_classes):
-        ax_img = axes[0, class_idx]
-        ax_true = axes[1, class_idx]
-        ax_pred = axes[2, class_idx]
-
+    for i, class_idx in enumerate(not_zero_classes):
+        ax_img = axes[0, i]
+        ax_true = axes[1, i]
+        ax_pred = axes[2, i]
 
         ax_img.imshow(X_test_sacled, interpolation='none')
         ax_true.imshow(Y_true[:,:,class_idx], interpolation='none', cmap='gray')
@@ -76,3 +78,7 @@ def plot_masks_predictions(X_test, Y_true, Y_pred, channels_mean, channels_std, 
     if filename is not None:
         plt.savefig(filename)
         logging.info('Image saved: %s', os.path.basename(filename))
+
+
+def plot_polygons(img_data, polygons):
+    pass
