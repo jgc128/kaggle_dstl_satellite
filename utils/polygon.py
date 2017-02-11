@@ -42,38 +42,6 @@ def create_mask_from_metadata(img_metadata, polygon_metadata):
     return image_mask
 
 
-def split_image_to_patches(image_data, patch_size):
-    patches = []
-    patches_coord = []
-
-    nb_patches_height = int(image_data.shape[0] / patch_size[0])
-    nb_patches_width = int(image_data.shape[1] / patch_size[1])
-
-    # TODO: deal with leftovers
-    leftover_height = image_data.shape[0] - nb_patches_height * patch_size[0]
-    leftover_width = image_data.shape[1] - nb_patches_width * patch_size[1]
-
-    for i in range(nb_patches_height):
-        for j in range(nb_patches_width):
-            c1 = (i * patch_size[0], j * patch_size[1])
-            patch = image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :]
-
-            patches.append(patch)
-            patches_coord.append(c1)
-
-    return patches, patches_coord
-
-
-def join_patches_to_image(patches, patches_coord, image_height, image_width):
-    nb_channels = patches[0].shape[2]
-    patch_size = patches[0].shape[:2]
-
-    image_data = np.zeros((image_height, image_width, nb_channels), dtype=patches.dtype)
-
-    for i, c1 in enumerate(patches_coord):
-        image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :] = patches[i]
-
-    return image_data
 
 
 def mask_to_polygons(mask, epsilon=5, min_area=1.0):
@@ -151,10 +119,7 @@ def create_polygons_from_mask(mask, image_metadata, scale=True):
     return poly
 
 
-def sample_patch(img_data, img_mask_data, patch_size, kind='train', val_size = 256):
-    img_height = img_mask_data.shape[0]
-    img_width = img_mask_data.shape[1]
-
+def sample_random_corner(img_height, img_width, patch_size, kind, val_size):
     if kind == 'train':
         min_height = 0
         min_width = val_size
@@ -165,6 +130,11 @@ def sample_patch(img_data, img_mask_data, patch_size, kind='train', val_size = 2
         min_width = 0
         max_height = img_height - patch_size[0]
         max_width = val_size
+    elif kind == 'all':
+        min_height = 0
+        min_width = 0
+        max_height = img_height - patch_size[0]
+        max_width = img_width - patch_size[1]
     else:
         raise ValueError('Kind {} is not valid'.format(kind))
 
@@ -174,10 +144,20 @@ def sample_patch(img_data, img_mask_data, patch_size, kind='train', val_size = 2
     )
     img_c2 = (img_c1[0] + patch_size[0], img_c1[1] + patch_size[1])
 
+    return img_c1, img_c2
+
+
+def sample_patch(img_data, img_mask_data, patch_size, kind='train', val_size = 256):
+    img_height = img_mask_data.shape[0]
+    img_width = img_mask_data.shape[1]
+
+    img_c1, img_c2 = sample_random_corner(img_height, img_width, patch_size, kind, val_size)
+
     img_patch = img_data[img_c1[0]:img_c2[0], img_c1[1]:img_c2[1], :]
     img_mask = img_mask_data[img_c1[0]:img_c2[0], img_c1[1]:img_c2[1], :]
 
     return img_patch, img_mask
+
 
 
 def sample_patches(images, images_data, images_masks_stacked, patch_size, nb_samples, kind='train', val_size = 256):
@@ -198,6 +178,80 @@ def sample_patches(images, images_data, images_masks_stacked, patch_size, nb_sam
         Y[i] = img_mask
 
     return X, Y
+
+
+def split_image_to_patches(image_data, patch_size, leftovers=True, add_random=0):
+    patches = []
+    patches_coord = []
+
+    nb_patches_height = int(image_data.shape[0] / patch_size[0])
+    nb_patches_width = int(image_data.shape[1] / patch_size[1])
+
+    # TODO: deal with leftovers
+    leftover_height = image_data.shape[0] - nb_patches_height * patch_size[0]
+    leftover_width = image_data.shape[1] - nb_patches_width * patch_size[1]
+
+    # tile
+    for i in range(nb_patches_height):
+        for j in range(nb_patches_width):
+            c1 = (i * patch_size[0], j * patch_size[1])
+            patch = image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :]
+
+            patches.append(patch)
+            patches_coord.append(c1)
+
+
+    # deal with leftovers
+    if leftovers:
+        for i in range(nb_patches_height):
+            c1 = (i * patch_size[0], image_data.shape[1] - patch_size[1])
+            patch = image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :]
+
+            patches.append(patch)
+            patches_coord.append(c1)
+
+        for j in range(nb_patches_width):
+            c1 = (image_data.shape[0] - patch_size[0], j * patch_size[0])
+            patch = image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :]
+
+            patches.append(patch)
+            patches_coord.append(c1)
+
+    # add random patches
+    for i in range(add_random):
+        c1, _ = sample_random_corner(image_data.shape[0], image_data.shape[1], patch_size, kind='all', val_size=0)
+        patch = image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :]
+
+        patches.append(patch)
+        patches_coord.append(c1)
+
+    return patches, patches_coord
+
+
+def join_mask_patches(patches, patches_coord, image_height, image_width, softmax_needed=False):
+    def softmax(x, axis=-1):
+        original_shape = x.shape
+        nb_classes = original_shape[axis]
+
+        x_reshaped = np.reshape(x, (-1, nb_classes))
+        x_sotfmaxed = np.exp(x_reshaped) / np.sum(np.exp(x_reshaped), axis=-1, keepdims=True)
+
+        x_res = np.reshape(x_sotfmaxed, original_shape)
+
+        return x_res
+
+    nb_channels = patches[0].shape[2]
+    patch_size = patches[0].shape[:2]
+
+    image_data = np.zeros((image_height, image_width, nb_channels), dtype=patches.dtype)
+
+    for i, c1 in enumerate(patches_coord):
+        image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :] += patches[i]
+
+    if softmax_needed:
+        image_data = softmax(image_data)
+
+    return image_data
 
 
 def jaccard_coef(y_pred, y_true, mean=True):

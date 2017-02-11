@@ -22,7 +22,7 @@ from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DI
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
 # https://github.com/shekkizh/FCN.tensorflow
 # https://github.com/warmspringwinds/tf-image-segmentation
-from utils.polygon import split_image_to_patches, join_patches_to_image, sample_patches, jaccard_coef
+from utils.polygon import split_image_to_patches, join_mask_patches, sample_patches, jaccard_coef
 
 
 class SimpleModel(BaseModel):
@@ -263,6 +263,8 @@ def predict(kind):
     nb_channels = 3
     nb_classes = 10
 
+    batch_size = 100
+
     # create and load model
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
     sess_config.gpu_options.allow_growth = True
@@ -290,13 +292,13 @@ def predict(kind):
         img_filename = os.path.join(IMAGES_NORMALIZED_DATA_DIR, img_id + '.npy')
         img_data = np.load(img_filename)
 
-        patches, patches_coord = split_image_to_patches(img_data, patch_size)
+        patches, patches_coord = split_image_to_patches(img_data, patch_size, leftovers=True, add_random=500)
 
         X = np.array(patches)
         data_dict = {'X': X}
-        classes_prob = model.predict(data_dict)
-        classes_prob_joined = join_patches_to_image(np.array(classes_prob), patches_coord, img_data.shape[0],
-                                                    img_data.shape[1])
+        classes_prob = model.predict(data_dict, batch_size=batch_size)
+        classes_prob_joined = join_mask_patches(np.array(classes_prob), patches_coord,
+            img_data.shape[0], img_data.shape[1], softmax_needed=True)
 
         masks = convert_softmax_to_masks(classes_prob_joined)
 
