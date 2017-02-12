@@ -225,7 +225,7 @@ def main():
             break
 
 
-def predict(kind):
+def predict(kind, model_to_restore):
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s : %(levelname)s : %(module)s : %(message)s", datefmt="%d-%m-%Y %H:%M:%S"
     )
@@ -280,7 +280,6 @@ def predict(kind):
 
     model.build_model()
 
-    model_to_restore = 'simple_model_reg-27750'
     model_filename = os.path.join(MODELS_DIR, model_to_restore)
     model.restore_model(model_filename)
     logging.info('Model restored: %s', os.path.basename(model_filename))
@@ -302,9 +301,8 @@ def predict(kind):
         mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, img_id + '.npy')
         np.save(mask_filename, masks)
 
-        if (img_number + 1) % 2 == 0:
-            logging.info('Predicted: %s/%s [%.2f]',
-                         img_number + 1, nb_target_images, 100 * (img_number + 1) / nb_target_images)
+        logging.info('Predicted: %s/%s [%.2f]',
+                     img_number + 1, nb_target_images, 100 * (img_number + 1) / nb_target_images)
 
 
 if __name__ == '__main__':
@@ -314,10 +312,14 @@ if __name__ == '__main__':
         task = sys.argv[1]
 
     if task == 'predict':
-        kind = 'test'
+        model = 'simple_model_reg-27750'
         if len(sys.argv) > 2:
-            kind = sys.argv[2]
-        predict(kind)
+            model = sys.argv[2]
+
+        kind = 'test'
+        if len(sys.argv) > 3:
+            kind = sys.argv[3]
+        predict(kind, model)
 
     if task == 'main':
         main()
