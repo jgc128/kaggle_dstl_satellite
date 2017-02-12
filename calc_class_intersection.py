@@ -9,11 +9,18 @@ from utils.data import load_pickle
 from utils.matplotlib import matplotlib_setup
 
 
-def get_intersection_area(mask1, mask2):
+def get_intersection_area(mask1, mask2, mode='union'):
     intersection = np.bitwise_and(mask1, mask2)
     union = np.bitwise_or(mask1, mask2)
 
-    intersection_fraction = intersection.sum() / union.sum()
+    if mode == 'union':
+        denominator = union.sum()
+    elif mode == 'mask1':
+        denominator = mask1.sum()
+    else:
+        raise ValueError('Mode unknown: {}'.format(mode))
+
+    intersection_fraction = intersection.sum() / denominator
 
     return intersection_fraction
 
@@ -71,7 +78,7 @@ def main():
     logging.info('Classes: %s', nb_classes)
 
     intersection_data = np.zeros((nb_classes, nb_classes), dtype=np.float32)
-    for i, j in itertools.combinations(range(1, nb_classes+1), r=2):
+    for i, j in itertools.permutations(range(1, nb_classes+1), 2):
         logging.info('Comparing classes %s and %s', i, j)
 
         i_masks = [images_masks[img_id][i] for img_id in images]
@@ -79,12 +86,11 @@ def main():
 
         intersections = []
         for k, img_id in enumerate(images):
-            intersection = get_intersection_area(i_masks[k],j_masks[k])
+            intersection = get_intersection_area(i_masks[k],j_masks[k], mode='mask1')
             intersections.append(intersection)
 
         mean_intersection = np.mean(np.nan_to_num(intersections))
         intersection_data[i-1,j-1] = mean_intersection
-        intersection_data[j-1,i-1] = mean_intersection
 
     plot_intersections(intersection_data, id2class)
 
