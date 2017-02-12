@@ -9,14 +9,11 @@ import tensorflow.contrib.slim as slim
 from random import shuffle
 
 from tensorflow_helpers.models.base_model import BaseModel
-from tensorflow_helpers.utils.data import batch_generator
 
-from calc_class_intersection import get_intersection_area
-from utils.data import load_grid_sizes, load_polygons, load_images, load_pickle, convert_mask_to_one_hot, \
-    convert_softmax_to_masks
+from utils.data import load_pickle, convert_mask_to_one_hot,  convert_softmax_to_masks
 from utils.matplotlib import matplotlib_setup
-from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, FIGURES_DIR, TENSORBOARD_DIR, MODELS_DIR, \
-    IMAGES_METADATA_FILENAME, TRAIN_PATCHES_COORDINATES_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
+from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, TENSORBOARD_DIR, MODELS_DIR, \
+    IMAGES_METADATA_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
     IMAGES_NORMALIZED_DATA_DIR, IMAGES_PREDICTION_MASK_DIR
 
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
@@ -263,7 +260,7 @@ def predict(kind):
     nb_channels = 3
     nb_classes = 10
 
-    batch_size = 100
+    batch_size = 60
 
     # create and load model
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
@@ -292,7 +289,7 @@ def predict(kind):
         img_filename = os.path.join(IMAGES_NORMALIZED_DATA_DIR, img_id + '.npy')
         img_data = np.load(img_filename)
 
-        patches, patches_coord = split_image_to_patches(img_data, patch_size, leftovers=True, add_random=500)
+        patches, patches_coord = split_image_to_patches(img_data, patch_size, leftovers=True, add_random=200)
 
         X = np.array(patches)
         data_dict = {'X': X}

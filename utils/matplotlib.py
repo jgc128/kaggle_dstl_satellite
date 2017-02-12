@@ -54,34 +54,44 @@ def plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true=None, tit
     if isinstance(img_poly_pred[list(img_poly_pred.keys())[0]], str):
         img_poly_pred = {i: shapely.wkt.loads(p) for i, p in img_poly_pred.items()}
 
-    img_poly_true = {i: shapely.wkt.loads(p['ploy_scaled']) for i, p in img_poly_true.items()}
+    if img_poly_true is not None:
+        img_poly_true = {i: shapely.wkt.loads(p['ploy_scaled']) for i, p in img_poly_true.items()}
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+    nb_cols = 2 if img_poly_true is not None else 1
+    figsize = (14, 7) if img_poly_true is not None else (7, 7)
+    fig, axes = plt.subplots(1, nb_cols, figsize=figsize)
 
-    ax_true = axes[0]
-    ax_pred = axes[1]
+    if not isinstance(axes, list):
+        axes = [axes]
 
-    # plot images
-    ax_true.imshow(img_data_scaled, interpolation='none')
+    # plot pred
+    ax_pred = axes[-1]
+
     ax_pred.imshow(img_data_scaled, interpolation='none')
 
-    # plot polygons
     plt_patches_pred = create_matplotlib_patches_from_polygons(img_poly_pred)
     ax_pred.add_collection(plt_patches_pred)
-
-    plt_patches_true = create_matplotlib_patches_from_polygons(img_poly_true)
-    ax_true.add_collection(plt_patches_true)
-
-    # set attributes
-    ax_true.set_xlim(0, img_metadata['width'])
-    ax_true.set_ylim(0, img_metadata['height'])
-    ax_true.set_axis_off()
 
     ax_pred.set_xlim(0, img_metadata['width'])
     ax_pred.set_ylim(0, img_metadata['height'])
     ax_pred.set_axis_off()
 
-    for ax, ax_title in zip(axes, ['Ground Truth', 'Predicted', ]):
+    if img_poly_true is not None:
+        ax_true = axes[0]
+
+        ax_true.imshow(img_data_scaled, interpolation='none')
+
+
+        plt_patches_true = create_matplotlib_patches_from_polygons(img_poly_true)
+        ax_true.add_collection(plt_patches_true)
+
+        # set attributes
+        ax_true.set_xlim(0, img_metadata['width'])
+        ax_true.set_ylim(0, img_metadata['height'])
+        ax_true.set_axis_off()
+
+    titles = ['Ground Truth', 'Predicted', ] if img_poly_true is not None else ['Predicted',]
+    for ax, ax_title in zip(axes, titles):
         ax.set_title(ax_title)
 
     if title is not None:

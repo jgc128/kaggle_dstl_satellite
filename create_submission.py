@@ -11,7 +11,7 @@ import pandas as pd
 from config import SAMPLE_SUBMISSION_FILENAME, IMAGES_PREDICTION_MASK_DIR, IMAGES_METADATA_FILENAME, SUBMISSION_DIR
 from utils.data import load_sample_submission, load_pickle
 from utils.matplotlib import matplotlib_setup, plot_mask
-from utils.polygon import create_polygons_from_mask
+from utils.polygon import create_polygons_from_mask, create_mask_from_metadata
 
 
 def save_submission(polygons, submission_order, filename):
@@ -52,6 +52,8 @@ def main():
 
     matplotlib_setup()
 
+    double_pass = False
+
     # load images metadata
     images_metadata, _, _ = load_pickle(IMAGES_METADATA_FILENAME)
     logging.info('Images metadata: %s', len(images_metadata))
@@ -61,6 +63,8 @@ def main():
 
     target_images = sorted(set([r[0] for r in submission_order]))
     logging.info('Target images: %s', len(target_images))
+
+    logging.info('Mode: %s', 'double pass' if double_pass else 'single pass')
 
     polygons = {}
     for i, img_id in enumerate(target_images):
@@ -72,7 +76,20 @@ def main():
         else:
             img_mask = None
 
-        img_polygons = create_image_polygons(img_mask, img_metadata, scale=True)
+        if not double_pass:
+            img_polygons = create_image_polygons(img_mask, img_metadata, scale=True)
+        else:
+            img_polygons = create_image_polygons(img_mask, img_metadata, scale=False)
+
+            img_mask_reconstructed = []
+            for class_type in sorted(img_polygons.keys()):
+                ploy_metadata = {'ploy_scaled': img_polygons[class_type].wkt}
+                img_class_mask_reconstructed = create_mask_from_metadata(img_metadata, ploy_metadata)
+                img_mask_reconstructed.append(img_class_mask_reconstructed)
+
+            img_mask = np.stack(img_mask_reconstructed, axis=-1)
+            img_polygons = create_image_polygons(img_mask, img_metadata, scale=True)
+
         polygons[img_id] = img_polygons
 
         if (i + 1) % 10 == 0:

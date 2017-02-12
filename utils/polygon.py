@@ -91,25 +91,35 @@ def mask_to_polygons(mask, epsilon=5, min_area=1.0):
     else:
         return MultiPolygon()
 
-def mask_to_polygons_v2(mask):
+def mask_to_polygons_v2(mask, min_area=1.0):
     all_polygons=[]
+    discarded = 0
     for shape, value in rasterio.features.shapes(mask.astype(np.int16), mask = (mask==1), transform = rasterio.Affine(1.0, 0, 0, 0, 1.0, 0)):
-
-        all_polygons.append(shapely.geometry.shape(shape))
+        poly = shapely.geometry.shape(shape)
+        if poly.area > min_area:
+            all_polygons.append(poly)
+        else:
+            discarded += 1
 
     all_polygons = shapely.geometry.MultiPolygon(all_polygons)
     if not all_polygons.is_valid:
         all_polygons = all_polygons.buffer(0)
         #Sometimes buffer() converts a simple Multipolygon to just a Polygon,
         #need to keep it a Multi throughout
+
         if all_polygons.type == 'Polygon':
             all_polygons = shapely.geometry.MultiPolygon([all_polygons])
+
+    # all_polygons = all_polygons.simplify(tolerance=0.1, preserve_topology=False)
+
+    if all_polygons.type == 'Polygon':
+        all_polygons = shapely.geometry.MultiPolygon([all_polygons])
 
     return all_polygons
 
 def create_polygons_from_mask(mask, image_metadata, scale=True):
-    # poly = mask_to_polygons(mask, min_area=1.0)
-    poly = mask_to_polygons_v2(mask)
+    poly = mask_to_polygons(mask, min_area=1.0)
+    # poly = mask_to_polygons_v2(mask)
 
     if scale:
         x_scaler = image_metadata['x_scaler']
