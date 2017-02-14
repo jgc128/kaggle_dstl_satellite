@@ -16,11 +16,13 @@ from utils.matplotlib import matplotlib_setup
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, TENSORBOARD_DIR, MODELS_DIR, \
     IMAGES_METADATA_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
     IMAGES_NORMALIZED_DATA_DIR, IMAGES_PREDICTION_MASK_DIR
+from utils.polygon import split_image_to_patches, join_mask_patches, sample_patches, jaccard_coef
+import utils.tf as tf_utils
 
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
 # https://github.com/shekkizh/FCN.tensorflow
 # https://github.com/warmspringwinds/tf-image-segmentation
-from utils.polygon import split_image_to_patches, join_mask_patches, sample_patches, jaccard_coef
+
 
 # def jaccard_coef_loss(y_true, y_pred):
 #     return -K.log(jaccard_coef(y_true, y_pred)) + binary_crossentropy(y_pred, y_true)
@@ -41,7 +43,6 @@ class SimpleModel(BaseModel):
         input_shape = tf.shape(input)
 
         targets = self.input_dict['Y']
-        targets_one_hot = tf.one_hot(targets, self.nb_classes + 1)
 
         net = input
 
@@ -91,92 +92,30 @@ class SimpleModel(BaseModel):
             net = net + pool3_scored
 
             # finally, upsample x8
-            net = slim.conv2d_transpose(net, self.nb_classes + 1, [16, 16], stride=8, scope='upsample_3',
-                                        activation_fn=None)
+            net = slim.conv2d_transpose(net, 128, [16, 16], stride=8, scope='upsample_3', activation_fn=None)
 
-            # # add few conv layers as the output
-            # net = slim.conv2d(net, 256, [1, 1], scope='conv_final')
+            # # add a few conv layers as the output
+            net = slim.conv2d(net, 128, [3, 3], scope='conv_final_1')
+            net = slim.conv2d(net, 128, [3, 3], scope='conv_final_2')
+            net = slim.conv2d(net, self.nb_classes, [1, 1], scope='conv_final_3')
 
         ########
         # Logits
 
         with tf.name_scope('prediction'):
-            classes_probs = tf.nn.softmax(net)
-
-            self.op_predict = classes_probs
-
-        with tf.name_scope('loss'):
-            cross_entropy = tf.nn.softmax_cross_entropy_with_logits(net, targets_one_hot)
-            loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1, 2]))
-
-            slim.losses.add_loss(loss)
-            self.op_loss = slim.losses.get_total_loss(add_regularization_losses=True)
-
-    def write_image_summary(self, name, image, nb_test_images=3):
-        if self.log_writer is not None:
-            image_data = tf.constant(image, dtype=tf.float32)
-
-            summary_op = tf.summary.image(name, image_data, max_outputs=nb_test_images)
-            summary_res = self.sess.run(summary_op)
-            self.log_writer.add_summary(summary_res, self._global_step)
-
-    def write_scalar_summary(self, tag, value):
-        if self.log_writer is not None:
-            summary = tf.Summary(value=[tf.Summary.Value(tag=tag, simple_value=float(value)), ])
-            self.log_writer.add_summary(summary, self._global_step)
-
-
-class ResNetModel(BaseModel):
-    def __init__(self, **kwargs):
-        super(ResNetModel, self).__init__()
-
-    def build_model(self):
-        input = self.input_dict['X']
-        input_shape = tf.shape(input)
-
-        targets = self.input_dict['Y']
-        targets_shape = tf.shape(targets)
-        nb_classes = int(targets.get_shape()[3])
-
-        with slim.arg_scope(nets.resnet_v2.resnet_arg_scope(self.is_train)):
-            net, end_points = nets.resnet_v2.resnet_v2_50(input, num_classes=nb_classes, global_pool=False, output_stride=16)
-
-
-        batch_norm_params = {'is_training': self.is_train, 'decay': 0.999, 'updates_collections': None}
-        with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
-                            normalizer_fn=slim.batch_norm, normalizer_params=batch_norm_params,
-                            weights_regularizer=slim.l2_regularizer(0.05)):
-
-            # first, upsample x2 and add scored pool4
-            net = slim.conv2d_transpose(net, 512, [4, 4], stride=2, scope='upsample_1', padding='SAME')
-            block1 = end_points['resnet_v2_50/block1/unit_3/bottleneck_v2/conv2']
-            block1_scored = slim.conv2d(block1, 512, [1, 1], scope='block1_scored', activation_fn=None)
-            net = net + block1_scored
-
-            # second, upsample x2 and add scored pool3
-            net = slim.conv2d_transpose(net, 256, [4, 4], stride=2, scope='upsample_2')
-            block2 = end_points['resnet_v2_50/block1/unit_1/bottleneck_v2']
-            block2_scored = slim.conv2d(block2, 256, [1, 1], scope='pool3_scored', activation_fn=None)
-            net = net + block2_scored
-
-            # finally, upsample x8
-            net = slim.conv2d_transpose(net, nb_classes, [8, 8], stride=4, scope='upsample_3',
-                                        activation_fn=None)
-
-
-        ########
-        # Logits
-
-        with tf.variable_scope('prediction'):
             classes_probs = tf.nn.sigmoid(net)
 
             self.op_predict = classes_probs
 
-        with tf.variable_scope('loss'):
+        with tf.name_scope('loss'):
             cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(net, targets)
-            loss = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1, 2]))
+            loss_ce = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1, 2]))
 
-            slim.losses.add_loss(loss)
+            loss_jaccard = tf_utils.jaccard_coef(targets, classes_probs)
+
+            loss_weighted = loss_ce + 3 * loss_jaccard
+
+            slim.losses.add_loss(loss_weighted)
             self.op_loss = slim.losses.get_total_loss(add_regularization_losses=True)
 
     def write_image_summary(self, name, image, nb_test_images=3):
@@ -229,7 +168,7 @@ def main(model_name):
     logging.info('Classes: %s, channels: %s', nb_classes, nb_channels)
 
     patch_size = (224, 224,)
-    val_size = 256
+    val_size = 224
     logging.info('Patch size: %s, validation size: %s', patch_size, val_size)
 
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
@@ -239,7 +178,7 @@ def main(model_name):
     model_params = {
         'nb_classes': nb_classes,
     }
-    model = ResNetModel(**model_params)
+    model = SimpleModel(**model_params)
     model.set_session(sess)
     model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, model_name))
 
@@ -254,7 +193,7 @@ def main(model_name):
     nb_iterations = 100000
     nb_samples_train = 1000 # 10 1000
     nb_samples_val = 512 # 10 512
-    batch_size = 60 # 5 40
+    batch_size = 40 # 5 40
 
     for iteration_number in range(1, nb_iterations + 1):
         try:
@@ -389,7 +328,7 @@ def predict(kind, model_to_restore):
 
 if __name__ == '__main__':
     task = 'main'
-    model_name = 'resnet'
+    model_name = 'simple_model_jaccard_sigmoid'
 
     if len(sys.argv) > 1:
         task = sys.argv[1]
