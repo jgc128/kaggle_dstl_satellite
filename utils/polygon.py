@@ -17,6 +17,11 @@ import numpy as np
 #     polygons = shapely.wkt.loads(poly).buffer(0.00001)
 #     return shapely.wkt.dumps(polygons)
 
+# def rotateImage(image, angle):
+#     image_center = tuple(np.array(image.shape[:2])/2)
+#     rot_mat = cv2.getRotationMatrix2D(image_center,angle,1.0)
+#     result = cv2.warpAffine(image, rot_mat, image.shape[:2],flags=cv2.INTER_LINEAR)
+#     return result
 
 
 def round_coords(coords):
@@ -274,6 +279,8 @@ def jaccard_coef(y_pred, y_true, mean=True):
     union = sum_tmp - intersection
 
     jaccard = (intersection + epsilon) / (union + epsilon)
-    jaccard_mean = np.mean(jaccard)
 
-    return jaccard_mean
+    if mean:
+        jaccard = np.mean(jaccard)
+
+    return jaccard

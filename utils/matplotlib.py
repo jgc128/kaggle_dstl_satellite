@@ -22,7 +22,7 @@ def matplotlib_setup():
     logging.info('Matplotlib backend: %s', matplotlib.get_backend())
 
 
-def plot_image(image_data, figure=None, subplot=111):
+def plot_image(image_data, figure=None, subplot=111, title=None):
     import matplotlib.pyplot as plt
     import tifffile as tiff
 
@@ -32,10 +32,14 @@ def plot_image(image_data, figure=None, subplot=111):
     # plt.show()
 
     tiff.imshow(image_data, figure=figure, subplot=subplot)
+
+    if title is not None:
+        plt.title(title)
+
     plt.show()
 
 
-def plot_mask(mask_data, figure=None, subplot=111):
+def plot_mask(mask_data, figure=None, subplot=111, title=None):
     """Adopted from https://www.kaggle.com/lopuhin/dstl-satellite-imagery-feature-detection/full-pipeline-demo-poly-pixels-ml-poly"""
     import matplotlib.pyplot as plt
     import tifffile as tiff
@@ -43,6 +47,10 @@ def plot_mask(mask_data, figure=None, subplot=111):
     mask_plot_data = 255 * np.stack([mask_data, mask_data, mask_data])
 
     tiff.imshow(mask_plot_data, figure=figure, subplot=subplot)
+
+    if title is not None:
+        plt.title(title)
+
     plt.show()
 
 
@@ -61,7 +69,7 @@ def plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true=None, tit
     figsize = (14, 7) if img_poly_true is not None else (7, 7)
     fig, axes = plt.subplots(1, nb_cols, figsize=figsize)
 
-    if not isinstance(axes, list):
+    if not isinstance(axes, np.ndarray):
         axes = [axes]
 
     # plot pred
@@ -81,7 +89,6 @@ def plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true=None, tit
 
         ax_true.imshow(img_data_scaled, interpolation='none')
 
-
         plt_patches_true = create_matplotlib_patches_from_polygons(img_poly_true)
         ax_true.add_collection(plt_patches_true)
 
@@ -90,7 +97,7 @@ def plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true=None, tit
         ax_true.set_ylim(0, img_metadata['height'])
         ax_true.set_axis_off()
 
-    titles = ['Ground Truth', 'Predicted', ] if img_poly_true is not None else ['Predicted',]
+    titles = ['Ground Truth', 'Predicted', ] if img_poly_true is not None else ['Predicted', ]
     for ax, ax_title in zip(axes, titles):
         ax.set_title(ax_title)
 
@@ -132,6 +139,25 @@ def create_matplotlib_patches_from_polygons(img_poly):
             #
             # break
 
-    plt_patches = PatchCollection(plt_polygons, facecolors=plt_colors)
+    plt_patches = PatchCollection(plt_polygons, facecolors=plt_colors, alpha=0.5)
 
     return plt_patches
+
+
+def plot_two_masks(mask1, mask2, titles=None):
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+
+    ax_m1 = axes[0]
+    ax_m2 = axes[1]
+
+    ax_m1.imshow(mask1, cmap='gray')
+    ax_m2.imshow(mask2, cmap='gray')
+
+    if titles is not None:
+        for ax, ax_title in zip(axes, titles):
+            ax.set_title(ax_title)
+
+    plt.tight_layout()
+    plt.show()

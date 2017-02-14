@@ -100,9 +100,37 @@ def load_sample_submission(filename):
 def convert_mask_to_one_hot(Y):
     batch_size, img_height, img_width, nb_classes = Y.shape
 
-    Y *= 2
+    # Classes:
+    # 1 - Buildings
+    # 2 - Misc. Manmade structures
+    # 3 - Road
+    # 4 - Track
+    # 5 - Trees
+    # 6 - Crops
+    # 7 - Waterway
+    # 8 - Standing water
+    # 9 - Vehicle Large
+    # 10 - Vehicle Small
+
+    classes_mul = {
+        1: 5,
+        2: 10,
+        3: 5,
+        4: 5,
+        5: 10,
+        6: 1,
+        7: 5,
+        8: 5,
+        9: 10,
+        10: 10,
+    }
+    classes_mul = [classes_mul[c+1] for c in range(nb_classes)]
+
+    Y_prior = Y * classes_mul
+
+    Y_prior *= 2
     no_class = np.full((batch_size, img_height, img_width), 1, dtype=np.uint8)
-    Y_one_hot = np.insert(Y, 0, no_class, axis=3)
+    Y_one_hot = np.insert(Y_prior, 0, no_class, axis=3)
     Y_one_hot = Y_one_hot.argmax(axis=-1)
 
     return Y_one_hot
