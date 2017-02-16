@@ -19,6 +19,7 @@ from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, TENSORBOAR
 from utils.polygon import split_image_to_patches, join_mask_patches, sample_patches, jaccard_coef
 import utils.tf as tf_utils
 
+
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
 # https://github.com/shekkizh/FCN.tensorflow
 # https://github.com/warmspringwinds/tf-image-segmentation
@@ -31,6 +32,8 @@ import utils.tf as tf_utils
 # (NIR-RED)/(NIR+RED)
 # dice loss, more weights
 # shapely.wkt.dumps(polygons, rounding_precision=12)
+# (RGB[0] - M[7] ) / (RGB[0] + M[7] + epsilon)
+# Polyak Averaging
 
 class SimpleModel(BaseModel):
     def __init__(self, **kwargs):
@@ -50,7 +53,8 @@ class SimpleModel(BaseModel):
         batch_norm_params = {'is_training': self.is_train, 'decay': 0.999, 'updates_collections': None}
         with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
                             normalizer_fn=slim.batch_norm, normalizer_params=batch_norm_params,
-                            weights_regularizer=slim.l2_regularizer(0.05)):
+                            weights_regularizer=slim.l2_regularizer(0.005)
+                            ):
             net = slim.conv2d(net, 64, [3, 3], scope='conv1_1')
             net = slim.conv2d(net, 64, [3, 3], scope='conv1_2')
             net = slim.max_pool2d(net, [2, 2], scope='pool1_1')
@@ -76,8 +80,8 @@ class SimpleModel(BaseModel):
             net = slim.conv2d(net, 512, [3, 3], scope='conv5_3')
             net = slim.max_pool2d(net, [2, 2], scope='pool5_1')
 
-            net = slim.conv2d(net, 4096, [1, 1], scope='conv6')
-            net = slim.conv2d(net, 1000, [1, 1], scope='conv7')
+            net = slim.conv2d(net, 512, [1, 1], scope='conv6')
+            net = slim.conv2d(net, 512, [1, 1], scope='conv7')
 
             # upsampling
 
@@ -92,12 +96,12 @@ class SimpleModel(BaseModel):
             net = net + pool3_scored
 
             # finally, upsample x8
-            net = slim.conv2d_transpose(net, 128, [16, 16], stride=8, scope='upsample_3', activation_fn=None)
+            net = slim.conv2d_transpose(net, 32, [16, 16], stride=8, scope='upsample_3')
 
             # # add a few conv layers as the output
-            net = slim.conv2d(net, 128, [3, 3], scope='conv_final_1')
-            net = slim.conv2d(net, 128, [3, 3], scope='conv_final_2')
-            net = slim.conv2d(net, self.nb_classes, [1, 1], scope='conv_final_3')
+            # net = slim.conv2d(net, 64, [3, 3], scope='conv_final_1')
+            # net = slim.conv2d(net, 32, [3, 3], scope='conv_final_2')
+            net = slim.conv2d(net, self.nb_classes, [1, 1], scope='conv_final_classes', activation_fn=None)
 
         ########
         # Logits
@@ -109,11 +113,13 @@ class SimpleModel(BaseModel):
 
         with tf.name_scope('loss'):
             cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(net, targets)
-            loss_ce = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1, 2]))
+            cross_entropy_classes = tf.reduce_sum(cross_entropy, axis=[1, 2])
+            cross_entropy_batch = tf.reduce_sum(cross_entropy_classes, axis=-1)
+            loss_ce = tf.reduce_mean(cross_entropy_batch)
 
             loss_jaccard = tf_utils.jaccard_coef(targets, classes_probs)
 
-            loss_weighted = loss_ce + 3 * loss_jaccard
+            loss_weighted = loss_ce - 200 * tf.log(loss_jaccard)
 
             slim.losses.add_loss(loss_weighted)
             self.op_loss = slim.losses.get_total_loss(add_regularization_losses=True)
@@ -139,10 +145,10 @@ def main(model_name):
 
     matplotlib_setup()
 
-    classes_names = ['Buildings', 'Misc. Manmade structures ', 'Road ', 'Track', 'Trees', 'Crops', 'Waterway ',
+    classes_names = ['Buildings', 'Misc. Manmade structures', 'Road', 'Track', 'Trees', 'Crops', 'Waterway',
                      'Standing water', 'Vehicle Large', 'Vehicle Small', ]
 
-    classes_names = [c.lower().replace(' ', '_').replace('.', '') for c in classes_names]
+    classes_names = [c.strip().lower().replace(' ', '_').replace('.', '') for c in classes_names]
 
     # load images
     images_data = load_pickle(IMAGES_NORMALIZED_FILENAME)
@@ -168,7 +174,7 @@ def main(model_name):
     logging.info('Classes: %s, channels: %s', nb_classes, nb_channels)
 
     patch_size = (224, 224,)
-    val_size = 224
+    val_size = 256
     logging.info('Patch size: %s, validation size: %s', patch_size, val_size)
 
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
@@ -184,16 +190,16 @@ def main(model_name):
 
     # TODO: not a fixed size
     model.add_input('X', [patch_size[0], patch_size[1], nb_channels])
-    model.add_input('Y', [patch_size[0], patch_size[1], nb_classes]) # , dtype=tf.uint8
+    model.add_input('Y', [patch_size[0], patch_size[1], nb_classes])  # , dtype=tf.uint8
 
     model.build_model()
 
     # train model
 
     nb_iterations = 100000
-    nb_samples_train = 1000 # 10 1000
-    nb_samples_val = 512 # 10 512
-    batch_size = 40 # 5 40
+    nb_samples_train = 1000  # 10 1000
+    nb_samples_val = 512  # 10 512
+    batch_size = 40  # 5 40
 
     for iteration_number in range(1, nb_iterations + 1):
         try:

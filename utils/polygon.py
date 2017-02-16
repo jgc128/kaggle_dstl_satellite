@@ -144,12 +144,17 @@ def sample_random_corner(img_height, img_width, patch_size, kind, val_size):
         min_height = 0
         min_width = 0
         max_height = img_height - patch_size[0]
-        max_width = val_size
+        max_width = val_size - patch_size[1]
     elif kind == 'all':
         min_height = 0
         min_width = 0
         max_height = img_height - patch_size[0]
         max_width = img_width - patch_size[1]
+    elif kind == 'test':
+        min_height = 0
+        min_width = 0
+        max_height = 10
+        max_width = 10
     else:
         raise ValueError('Kind {} is not valid'.format(kind))
 
