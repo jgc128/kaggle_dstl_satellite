@@ -34,10 +34,14 @@ import utils.tf as tf_utils
 # shapely.wkt.dumps(polygons, rounding_precision=12)
 # (RGB[0] - M[7] ) / (RGB[0] + M[7] + epsilon)
 # Polyak Averaging
+# RGB + M[0] + M[5:8]
+# tree, water - excluding
+
 
 class SimpleModel(BaseModel):
     def __init__(self, **kwargs):
         super(SimpleModel, self).__init__()
+        logging.info('Using model: %s', type(self).__name__)
 
         self.nb_classes = kwargs.get('nb_classes')
 
@@ -101,6 +105,85 @@ class SimpleModel(BaseModel):
             # # add a few conv layers as the output
             # net = slim.conv2d(net, 64, [3, 3], scope='conv_final_1')
             # net = slim.conv2d(net, 32, [3, 3], scope='conv_final_2')
+
+        with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
+                            weights_regularizer=slim.l2_regularizer(0.005)
+                            ):
+            net = slim.conv2d(net, self.nb_classes, [1, 1], scope='conv_final_classes', activation_fn=None)
+
+        ########
+        # Logits
+
+        with tf.name_scope('prediction'):
+            classes_probs = tf.nn.sigmoid(net)
+
+            self.op_predict = classes_probs
+
+        with tf.name_scope('loss'):
+            cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(net, targets)
+            cross_entropy_classes = tf.reduce_sum(cross_entropy, axis=[1, 2])
+            cross_entropy_batch = tf.reduce_sum(cross_entropy_classes, axis=-1)
+            loss_ce = tf.reduce_mean(cross_entropy_batch)
+
+            loss_jaccard = tf_utils.jaccard_coef(targets, classes_probs)
+
+            loss_weighted = loss_ce - 3000 * tf.log(loss_jaccard)
+
+            slim.losses.add_loss(loss_weighted)
+            self.op_loss = slim.losses.get_total_loss(add_regularization_losses=True)
+
+    def write_image_summary(self, name, image, nb_test_images=3):
+        if self.log_writer is not None:
+            image_data = tf.constant(image, dtype=tf.float32)
+
+            summary_op = tf.summary.image(name, image_data, max_outputs=nb_test_images)
+            summary_res = self.sess.run(summary_op)
+            self.log_writer.add_summary(summary_res, self._global_step)
+
+    def write_scalar_summary(self, tag, value):
+        if self.log_writer is not None:
+            summary = tf.Summary(value=[tf.Summary.Value(tag=tag, simple_value=float(value)), ])
+            self.log_writer.add_summary(summary, self._global_step)
+
+
+class ResNetModel(BaseModel):
+    def __init__(self, **kwargs):
+        super(ResNetModel, self).__init__()
+        logging.info('Using model: %s', type(self).__name__)
+
+        self.nb_classes = kwargs.get('nb_classes')
+
+    def build_model(self):
+        input = self.input_dict['X']
+        input_shape = tf.shape(input)
+
+        targets = self.input_dict['Y']
+
+        net = input
+
+        with slim.arg_scope(nets.resnet_v2.resnet_arg_scope(self.is_train)):
+            net, end_points = nets.resnet_v2.resnet_v2_50(net, num_classes=None, global_pool=False, output_stride=16)
+
+        batch_norm_params = {'is_training': self.is_train, 'decay': 0.999, 'updates_collections': None}
+        with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
+                            normalizer_fn=slim.batch_norm, normalizer_params=batch_norm_params,
+                            weights_regularizer=slim.l2_regularizer(0.05)):
+            # first, upsample x2 and add scored pool4
+            net = slim.conv2d_transpose(net, 256, [4, 4], stride=2, scope='upsample_1', padding='SAME')
+            block1 = end_points['resnet_v2_50/block2/unit_3/bottleneck_v2']
+            block1_scored = slim.conv2d(block1, 256, [1, 1], scope='block1_scored', activation_fn=None)
+            net = net + block1_scored
+
+            # second, upsample x2 and add scored pool3
+            net = slim.conv2d_transpose(net, 128, [4, 4], stride=2, scope='upsample_2')
+            block2 = end_points['resnet_v2_50/block1/unit_2/bottleneck_v2']
+            block2_scored = slim.conv2d(block2, 128, [1, 1], scope='pool3_scored', activation_fn=None)
+            net = net + block2_scored
+
+            # finally, upsample x8
+            net = slim.conv2d_transpose(net, 64, [8, 8], stride=4, scope='upsample_3')
+
+            # net = slim.conv2d(net, 64, [3, 3], scope='conv_final')
             net = slim.conv2d(net, self.nb_classes, [1, 1], scope='conv_final_classes', activation_fn=None)
 
         ########
@@ -334,7 +417,7 @@ def predict(kind, model_to_restore):
 
 if __name__ == '__main__':
     task = 'main'
-    model_name = 'simple_model_jaccard_sigmoid'
+    model_name = 'simple_model_jaccard_sigmoid_no_bn_last'  # 'resnet' 'simple_model_jaccard_sigmoid'
 
     if len(sys.argv) > 1:
         task = sys.argv[1]
