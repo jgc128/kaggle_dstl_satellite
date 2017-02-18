@@ -62,14 +62,24 @@ def _get_images_filenames(directory, target_images):
     return images_filenames, target_images
 
 
+def load_image(img_filename):
+    img_data = tiff.imread(img_filename)
+
+    if len(img_data.shape) > 2:
+        img_data = img_data.transpose([1, 2, 0])
+    else:
+        img_data = np.expand_dims(img_data, -1)
+
+    return img_data
+
 def load_images(directory, target_images=None):
     images_filenames, target_images = _get_images_filenames(directory, target_images)
 
     # transpose to get the (height, width, channels) shape
     images_data = {}
     for i, img_id in enumerate(target_images):
-        img_data = tiff.imread(images_filenames[i]).transpose([1, 2, 0])
-        images_data[img_id] = img_data
+        img_filename = images_filenames[i]
+        images_data[img_id] = load_image(img_filename)
 
         if (i + 1) % 10 == 0:
             logging.info('Loaded: %s/%s [%.2f]', (i + 1), len(target_images), 100 * (i + 1) / len(target_images))
@@ -78,12 +88,14 @@ def load_images(directory, target_images=None):
     return images_data
 
 
+
 def get_images_sizes(directory, target_images=None):
     images_filenames, target_images = _get_images_filenames(directory, target_images)
 
     images_sizes = {}
     for i, img_id in enumerate(target_images):
-        img = tiff.imread(images_filenames[i]).transpose([1, 2, 0])
+        img_filename = images_filenames[i]
+        img = load_image(img_filename)
         images_sizes[img_id] = img.shape[:2]
 
     logging.info('Image sizes: %s', len(images_sizes))

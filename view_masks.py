@@ -60,8 +60,8 @@ def main(kind):
     jaccards_reconstructed = []
     jaccards = []
     for img_idx, img_id in enumerate(target_images):
-        if img_id != '6110_1_2':
-            continue
+        # if img_id != '6110_1_2':
+        #     continue
 
         mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, img_id + '.npy')
         if not os.path.isfile(mask_filename):
@@ -83,26 +83,27 @@ def main(kind):
             img_mask_true = images_masks_stacked[img_id]
         else:
             img_poly_true = None
-
+            img_mask_true = None
 
         img_poly_pred = create_image_polygons(img_mask_pred, img_metadata, scale=False)
-        plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true, title=img_id, show=False)
+        # plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true, title=img_id, show=False)
 
-        # if kind == 'train':
-        #     # convert predicted polygons to mask
-        #     img_mask_reconstructed = []
-        #     for class_type in sorted(img_poly_pred.keys()):
-        #         ploy_metadata = {'ploy_scaled': img_poly_pred[class_type].wkt}
-        #         img_class_mask_reconstructed = create_mask_from_metadata(img_metadata, ploy_metadata)
-        #         img_mask_reconstructed.append(img_class_mask_reconstructed)
-        #     img_mask_reconstructed = np.stack(img_mask_reconstructed, axis=-1)
-        #
-        #
-        #     jaccard = jaccard_coef(img_mask_pred, img_mask_true)
-        #     jaccard_reconstructed = jaccard_coef(img_mask_reconstructed, img_mask_true)
-        #     jaccards.append(jaccard)
-        #     jaccards_reconstructed.append(jaccard_reconstructed)
-        #     logging.info('Image: %s, jaccard: %s, jaccard reconstructed: %s', img_id, jaccard, jaccard_reconstructed)
+        if kind == 'train':
+            # convert predicted polygons to mask
+            img_mask_reconstructed = []
+            for class_type in sorted(img_poly_pred.keys()):
+                ploy_metadata = {'ploy_scaled': img_poly_pred[class_type].wkt}
+                img_class_mask_reconstructed = create_mask_from_metadata(img_metadata, ploy_metadata)
+                img_mask_reconstructed.append(img_class_mask_reconstructed)
+            img_mask_reconstructed = np.stack(img_mask_reconstructed, axis=-1)
+
+
+            jaccard = jaccard_coef(img_mask_pred, img_mask_true)
+            jaccard_reconstructed = jaccard_coef(img_mask_reconstructed, img_mask_true)
+            jaccards.append(jaccard)
+            jaccards_reconstructed.append(jaccard_reconstructed)
+            logging.info('Image: %s, jaccard: %s, jaccard reconstructed: %s', img_id, jaccard, jaccard_reconstructed)
+
 
     if kind == 'train':
         logging.info('Mean jaccard: %s, Mean jaccard reconstructed: %s', np.mean(jaccards), np.mean(jaccards_reconstructed))

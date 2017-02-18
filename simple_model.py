@@ -16,7 +16,7 @@ from utils.matplotlib import matplotlib_setup
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME, TENSORBOARD_DIR, MODELS_DIR, \
     IMAGES_METADATA_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
     IMAGES_NORMALIZED_DATA_DIR, IMAGES_PREDICTION_MASK_DIR
-from utils.polygon import split_image_to_patches, join_mask_patches, sample_patches, jaccard_coef
+from utils.polygon import split_image_to_patches, join_mask_patches, sample_patches
 import utils.tf as tf_utils
 
 
@@ -127,23 +127,10 @@ class SimpleModel(BaseModel):
 
             loss_jaccard = tf_utils.jaccard_coef(targets, classes_probs)
 
-            loss_weighted = loss_ce - 3000 * tf.log(loss_jaccard)
+            loss_weighted = loss_ce - 1000 * tf.log(loss_jaccard)
 
             slim.losses.add_loss(loss_weighted)
             self.op_loss = slim.losses.get_total_loss(add_regularization_losses=True)
-
-    def write_image_summary(self, name, image, nb_test_images=3):
-        if self.log_writer is not None:
-            image_data = tf.constant(image, dtype=tf.float32)
-
-            summary_op = tf.summary.image(name, image_data, max_outputs=nb_test_images)
-            summary_res = self.sess.run(summary_op)
-            self.log_writer.add_summary(summary_res, self._global_step)
-
-    def write_scalar_summary(self, tag, value):
-        if self.log_writer is not None:
-            summary = tf.Summary(value=[tf.Summary.Value(tag=tag, simple_value=float(value)), ])
-            self.log_writer.add_summary(summary, self._global_step)
 
 
 class ResNetModel(BaseModel):
@@ -152,6 +139,8 @@ class ResNetModel(BaseModel):
         logging.info('Using model: %s', type(self).__name__)
 
         self.nb_classes = kwargs.get('nb_classes')
+
+        self.op_jaccard = None
 
     def build_model(self):
         input = self.input_dict['X']
@@ -183,6 +172,10 @@ class ResNetModel(BaseModel):
             # finally, upsample x8
             net = slim.conv2d_transpose(net, 64, [8, 8], stride=4, scope='upsample_3')
 
+
+        with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
+                            weights_regularizer=slim.l2_regularizer(0.005)
+                            ):
             # net = slim.conv2d(net, 64, [3, 3], scope='conv_final')
             net = slim.conv2d(net, self.nb_classes, [1, 1], scope='conv_final_classes', activation_fn=None)
 
@@ -193,6 +186,7 @@ class ResNetModel(BaseModel):
             classes_probs = tf.nn.sigmoid(net)
 
             self.op_predict = classes_probs
+            self.op_jaccard = tf_utils.jaccard_coef(targets, classes_probs, mean=False)
 
         with tf.name_scope('loss'):
             cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(net, targets)
@@ -202,23 +196,11 @@ class ResNetModel(BaseModel):
 
             loss_jaccard = tf_utils.jaccard_coef(targets, classes_probs)
 
-            loss_weighted = loss_ce - 200 * tf.log(loss_jaccard)
+            loss_weighted = loss_ce - 1000 * tf.log(loss_jaccard)
 
             slim.losses.add_loss(loss_weighted)
             self.op_loss = slim.losses.get_total_loss(add_regularization_losses=True)
 
-    def write_image_summary(self, name, image, nb_test_images=3):
-        if self.log_writer is not None:
-            image_data = tf.constant(image, dtype=tf.float32)
-
-            summary_op = tf.summary.image(name, image_data, max_outputs=nb_test_images)
-            summary_res = self.sess.run(summary_op)
-            self.log_writer.add_summary(summary_res, self._global_step)
-
-    def write_scalar_summary(self, tag, value):
-        if self.log_writer is not None:
-            summary = tf.Summary(value=[tf.Summary.Value(tag=tag, simple_value=float(value)), ])
-            self.log_writer.add_summary(summary, self._global_step)
 
 
 def main(model_name):
@@ -267,7 +249,7 @@ def main(model_name):
     model_params = {
         'nb_classes': nb_classes,
     }
-    model = SimpleModel(**model_params)
+    model = ResNetModel(**model_params)
     model.set_session(sess)
     model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, model_name))
 
@@ -280,9 +262,9 @@ def main(model_name):
     # train model
 
     nb_iterations = 100000
-    nb_samples_train = 1000  # 10 1000
-    nb_samples_val = 512  # 10 512
-    batch_size = 40  # 5 40
+    nb_samples_train = 10  # 10 1000
+    nb_samples_val = 10  # 10 512
+    batch_size = 30  # 5 30
 
     for iteration_number in range(1, nb_iterations + 1):
         try:
@@ -297,23 +279,14 @@ def main(model_name):
                 X_val, Y_val = sample_patches(images, images_data, images_masks_stacked, patch_size, nb_samples_val,
                                               kind='val', val_size=val_size)
 
-                data_dict_val = {'X': X_val}
-                Y_val_pred_probs = model.predict(data_dict_val, batch_size=batch_size)
-                Y_val_pred_probs = np.array(Y_val_pred_probs)
-                Y_val_pred = np.round(Y_val_pred_probs)
-
-                jaccard_val = jaccard_coef(Y_val_pred, Y_val, mean=False)
+                data_dict_val = {'X': X_val, 'Y': Y_val}
+                jaccard_val = model.predict(data_dict_val, target_op=model.op_jaccard, batch_size=batch_size)
 
                 X_train_val, Y_train_val = sample_patches(images, images_data, images_masks_stacked, patch_size,
-                                                          nb_samples_val,
-                                                          kind='train', val_size=val_size)
+                                                          nb_samples_val, kind='train', val_size=val_size)
 
-                data_dict_train_val = {'X': X_train_val}
-                Y_train_val_pred_probs = model.predict(data_dict_train_val, batch_size=batch_size)
-                Y_train_val_pred_probs = np.array(Y_train_val_pred_probs)
-                Y_train_val_pred = np.round(Y_train_val_pred_probs)
-
-                jaccard_train_val = jaccard_coef(Y_train_val_pred, Y_train_val, mean=False)
+                data_dict_train_val = {'X': X_train_val, 'Y': Y_train_val}
+                jaccard_train_val = model.predict(data_dict_train_val, target_op=model.op_jaccard, batch_size=batch_size)
 
                 logging.info('Iteration %s, jaccard val: %.5f, jaccard train: %.5f',
                              iteration_number, np.mean(jaccard_val), np.mean(jaccard_train_val))
@@ -335,7 +308,7 @@ def main(model_name):
             break
 
 
-def predict(kind, model_to_restore):
+def predict(kind, model_name, global_step):
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s : %(levelname)s : %(module)s : %(message)s", datefmt="%d-%m-%Y %H:%M:%S"
     )
@@ -366,11 +339,11 @@ def predict(kind, model_to_restore):
     nb_target_images = len(target_images)
     logging.info('Target images: %s - %s', kind, nb_target_images)
 
-    patch_size = (256, 256)
+    patch_size = (224, 224,)
     nb_channels = 3
     nb_classes = 10
 
-    batch_size = 60
+    batch_size = 30
 
     # create and load model
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
@@ -386,10 +359,11 @@ def predict(kind, model_to_restore):
 
     # TODO: not a fixed size
     model.add_input('X', [patch_size[0], patch_size[0], nb_channels])
-    model.add_input('Y', [patch_size[0], patch_size[1], ], dtype=tf.uint8)
+    model.add_input('Y', [patch_size[0], patch_size[1], nb_classes])  # , dtype=tf.uint8
 
     model.build_model()
 
+    model_to_restore = '{}-{}'.format(model_name, global_step)
     model_filename = os.path.join(MODELS_DIR, model_to_restore)
     model.restore_model(model_filename)
     logging.info('Model restored: %s', os.path.basename(model_filename))
@@ -403,13 +377,14 @@ def predict(kind, model_to_restore):
         X = np.array(patches)
         data_dict = {'X': X}
         classes_prob = model.predict(data_dict, batch_size=batch_size)
-        classes_prob_joined = join_mask_patches(np.array(classes_prob), patches_coord,
-                                                img_data.shape[0], img_data.shape[1], softmax_needed=True)
+        masks = np.round(np.array(classes_prob))
+        masks_joined = join_mask_patches(masks, patches_coord, img_data.shape[0], img_data.shape[1],
+                                                softmax=False, normalization=True)
 
-        masks = convert_softmax_to_masks(classes_prob_joined)
+        masks_joined = np.round(masks_joined)
 
         mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, img_id + '.npy')
-        np.save(mask_filename, masks)
+        np.save(mask_filename, masks_joined)
 
         logging.info('Predicted: %s/%s [%.2f]',
                      img_number + 1, nb_target_images, 100 * (img_number + 1) / nb_target_images)
@@ -417,20 +392,21 @@ def predict(kind, model_to_restore):
 
 if __name__ == '__main__':
     task = 'main'
-    model_name = 'simple_model_jaccard_sigmoid_no_bn_last'  # 'resnet' 'simple_model_jaccard_sigmoid'
+    model_name = 'resnet_jaccard1000'  # 'resnet' 'simple_model_jaccard_sigmoid'
 
     if len(sys.argv) > 1:
         task = sys.argv[1]
 
     if task == 'predict':
-        model = 'simple_model_reg-27750'
-        if len(sys.argv) > 2:
-            model = sys.argv[2]
-
         kind = 'test'
+        if len(sys.argv) > 2:
+            kind = sys.argv[2]
+
+        global_step = 555
         if len(sys.argv) > 3:
-            kind = sys.argv[3]
-        predict(kind, model)
+            global_step = sys.argv[3]
+
+        predict(kind, model_name, global_step)
 
     if task == 'main':
         main(model_name)

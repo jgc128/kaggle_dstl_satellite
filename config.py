@@ -11,6 +11,7 @@ SAMPLE_SUBMISSION_FILENAME = os.path.join(DATA_DIR, 'sample_submission.csv')
 GRID_SIZES_FILENAME = os.path.join(DATA_DIR, 'grid_sizes.csv')
 POLYGONS_FILENAME = os.path.join(DATA_DIR, 'train_wkt_v4.csv')
 IMAGES_THREE_BAND_DIR = os.path.join(DATA_DIR, 'three_band/')
+IMAGES_SIXTEEN_BAND_DIR = os.path.join(DATA_DIR, 'sixteen_band/')
 
 IMAGES_METADATA_FILENAME = os.path.join(DATA_DIR, 'images_metadata.pkl')
 IMAGES_METADATA_POLYGONS_FILENAME = os.path.join(DATA_DIR, 'images_metadata_polygons.pkl')

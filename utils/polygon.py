@@ -109,13 +109,8 @@ def mask_to_polygons_v2(mask, min_area=1.0):
     all_polygons = shapely.geometry.MultiPolygon(all_polygons)
     if not all_polygons.is_valid:
         all_polygons = all_polygons.buffer(0)
-        #Sometimes buffer() converts a simple Multipolygon to just a Polygon,
-        #need to keep it a Multi throughout
 
-        if all_polygons.type == 'Polygon':
-            all_polygons = shapely.geometry.MultiPolygon([all_polygons])
-
-    # all_polygons = all_polygons.simplify(tolerance=0.1, preserve_topology=False)
+    all_polygons = all_polygons.simplify(tolerance=0.1, preserve_topology=False)
 
     if all_polygons.type == 'Polygon':
         all_polygons = shapely.geometry.MultiPolygon([all_polygons])
@@ -248,8 +243,8 @@ def split_image_to_patches(image_data, patch_size, leftovers=True, add_random=0)
     return patches, patches_coord
 
 
-def join_mask_patches(patches, patches_coord, image_height, image_width, softmax_needed=False):
-    def softmax(x, axis=-1):
+def join_mask_patches(patches, patches_coord, image_height, image_width, softmax=False, normalization = False):
+    def np_softmax(x, axis=-1):
         original_shape = x.shape
         nb_classes = original_shape[axis]
 
@@ -264,28 +259,17 @@ def join_mask_patches(patches, patches_coord, image_height, image_width, softmax
     patch_size = patches[0].shape[:2]
 
     image_data = np.zeros((image_height, image_width, nb_channels), dtype=patches.dtype)
+    counts = np.zeros((image_height, image_width, nb_channels), dtype=np.float32)
+    counts += 0.000001
 
     for i, c1 in enumerate(patches_coord):
         image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :] += patches[i]
+        counts[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :] += np.ones_like(patches[i], dtype=np.float32)
 
-    if softmax_needed:
-        image_data = softmax(image_data)
+    if softmax:
+        image_data = np_softmax(image_data)
+
+    if normalization:
+        image_data = image_data / counts
 
     return image_data
-
-
-def jaccard_coef(y_pred, y_true, mean=True):
-    # inspired by https://www.kaggle.com/drn01z3/dstl-satellite-imagery-feature-detection/end-to-end-baseline-with-u-net-keras
-
-    epsilon = 0.00001
-
-    intersection = np.sum(y_pred * y_true, axis=(0,1,2))
-    sum_tmp = np.sum(y_pred + y_true, axis=(0,1,2))
-    union = sum_tmp - intersection
-
-    jaccard = (intersection + epsilon) / (union + epsilon)
-
-    if mean:
-        jaccard = np.mean(jaccard)
-
-    return jaccard
