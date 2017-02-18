@@ -4,7 +4,7 @@ import numpy as np
 
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_METADATA_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
     IMAGES_MASKS_FILENAME
-from utils.data import load_pickle, convert_mask_to_one_hot, convert_softmax_to_masks
+from utils.data import load_pickle, convert_masks_to_softmax, convert_softmax_to_masks
 from utils.matplotlib import matplotlib_setup, plot_image, plot_mask, plot_two_masks
 
 
@@ -53,7 +53,7 @@ def main():
     test_img_id = '6120_2_2'
 
     # convert ot one hot and back
-    masks_softmax = convert_mask_to_one_hot(np.expand_dims(images_masks_stacked[test_img_id], 0))[0]
+    masks_softmax = convert_masks_to_softmax(np.expand_dims(images_masks_stacked[test_img_id], 0))[0]
     masks_softmax_flattened = np.reshape(masks_softmax, (-1))
     mask_probs = np.zeros((masks_softmax_flattened.shape[0], 11))
     mask_probs[np.arange(masks_softmax_flattened.shape[0]), masks_softmax_flattened] = 1

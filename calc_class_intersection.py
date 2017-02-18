@@ -3,8 +3,9 @@ import itertools
 
 import numpy as np
 
-from config import IMAGES_MASKS_FILENAME, IMAGES_METADATA_FILENAME
-from config import IMAGES_NORMALIZED_FILENAME
+from joblib import Parallel, delayed
+
+from config import IMAGES_MASKS_FILENAME, CLASSES_NAMES
 from utils.data import load_pickle
 from utils.matplotlib import matplotlib_setup
 
@@ -20,9 +21,25 @@ def get_intersection_area(mask1, mask2, mode='union'):
     else:
         raise ValueError('Mode unknown: {}'.format(mode))
 
-    intersection_fraction = intersection.sum() / denominator
+    if denominator == 0:
+        return 0
 
+    intersection_fraction = intersection.sum() / denominator
     return intersection_fraction
+
+
+def get_intersections(images, images_masks, i, j, mode='union'):
+    i_masks = [images_masks[img_id][i] for img_id in images]
+    j_masks = [images_masks[img_id][j] for img_id in images]
+
+    intersections = []
+    for k, img_id in enumerate(images):
+        intersection = get_intersection_area(i_masks[k], j_masks[k], mode=mode)
+        intersections.append(intersection)
+
+    mean_intersection = np.mean(intersections)
+    return mean_intersection
+
 
 def plot_intersections(intersection_data, id2class):
     import matplotlib.pyplot as plt
@@ -35,7 +52,7 @@ def plot_intersections(intersection_data, id2class):
     fig.colorbar(img)
 
     ticks = range(len(id2class))
-    labels = [id2class[i+1] for i in ticks]
+    labels = [id2class[i + 1] for i in ticks]
 
     ax.set_yticks(ticks)
     ax.set_yticklabels(labels)
@@ -47,6 +64,7 @@ def plot_intersections(intersection_data, id2class):
     fig.tight_layout(pad=2)
 
     plt.show()
+
 
 def main():
     logging.basicConfig(
@@ -61,38 +79,25 @@ def main():
     images = sorted(images_masks.keys())
     logging.info('Images: %s', len(images))
 
-    classes = [
-        'Buildings',
-        'Misc. Manmade structures ',
-        'Road ',
-        'Track',
-        'Trees',
-        'Crops',
-        'Waterway ',
-        'Standing water',
-        'Vehicle Large',
-        'Vehicle Small',
-    ]
-    id2class = {i+1:c for i, c in enumerate(classes)}
-    nb_classes = len(classes)
+    id2class = {i + 1: c for i, c in enumerate(CLASSES_NAMES)}
+    nb_classes = len(CLASSES_NAMES)
     logging.info('Classes: %s', nb_classes)
 
+    # calc intersections
+    permutations = list(itertools.permutations(range(1, nb_classes + 1), 2))
+    intersections = []
+    for k, (i, j) in enumerate(permutations):
+        inter = get_intersections(images, images_masks, i, j, mode='mask1')
+        intersections.append(inter)
+
+        logging.info('Finished %s/%s [%.2f%%, classes %s - %s]', k + 1, len(permutations), 100 * (k + 1) / len(permutations), i, j)
+
     intersection_data = np.zeros((nb_classes, nb_classes), dtype=np.float32)
-    for i, j in itertools.permutations(range(1, nb_classes+1), 2):
-        logging.info('Comparing classes %s and %s', i, j)
-
-        i_masks = [images_masks[img_id][i] for img_id in images]
-        j_masks = [images_masks[img_id][j] for img_id in images]
-
-        intersections = []
-        for k, img_id in enumerate(images):
-            intersection = get_intersection_area(i_masks[k],j_masks[k], mode='mask1')
-            intersections.append(intersection)
-
-        mean_intersection = np.mean(np.nan_to_num(intersections))
-        intersection_data[i-1,j-1] = mean_intersection
+    for k, (i, j) in enumerate(permutations):
+        intersection_data[i-1, j-1] = intersections[k]
 
     plot_intersections(intersection_data, id2class)
+
 
 
 if __name__ == '__main__':

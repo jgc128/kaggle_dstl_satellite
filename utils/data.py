@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import shapely
 import tifffile as tiff
+import skimage.transform
+import skimage.color
 
 from config import DEBUG, DEBUG_IMAGE
 
@@ -48,16 +50,19 @@ def load_polygons(filename):
     return data
 
 
-def _get_images_filenames(directory, target_images):
+def _get_images_filenames(directory, target_images, target_format=None):
+    # TODO: as for now it works only with three band dir
     if target_images is None:
         target_images = sorted([f[:-4] for f in os.listdir(directory)])  # :-4 to discard .tif
 
-    if DEBUG:
-        target_images = [DEBUG_IMAGE, ]
-
     logging.info('Images: %s', len(target_images))
 
-    images_filenames = [os.path.join(directory, i + '.tif') for i in target_images]
+    if target_format is None:
+        filename_format = '{0}.tif'
+    else:
+        filename_format = '{0}_{1}.tif'
+
+    images_filenames = [os.path.join(directory, filename_format.format(img_id, target_format)) for img_id in target_images]
 
     return images_filenames, target_images
 
@@ -66,16 +71,17 @@ def load_image(img_filename):
     img_data = tiff.imread(img_filename)
 
     if len(img_data.shape) > 2:
+        # transpose to get the (height, width, channels) shape
         img_data = img_data.transpose([1, 2, 0])
     else:
+        # if the image does not have channels - add one
         img_data = np.expand_dims(img_data, -1)
 
     return img_data
 
-def load_images(directory, target_images=None):
-    images_filenames, target_images = _get_images_filenames(directory, target_images)
+def load_images(directory, target_images=None, target_format=None):
+    images_filenames, target_images = _get_images_filenames(directory, target_images, target_format)
 
-    # transpose to get the (height, width, channels) shape
     images_data = {}
     for i, img_id in enumerate(target_images):
         img_filename = images_filenames[i]
@@ -84,13 +90,13 @@ def load_images(directory, target_images=None):
         if (i + 1) % 10 == 0:
             logging.info('Loaded: %s/%s [%.2f]', (i + 1), len(target_images), 100 * (i + 1) / len(target_images))
 
-    logging.info('Images data: %s', len(images_data))
+    logging.info('Images data: %s - %s', target_format or '*', len(images_data))
     return images_data
 
 
 
-def get_images_sizes(directory, target_images=None):
-    images_filenames, target_images = _get_images_filenames(directory, target_images)
+def get_images_sizes(directory, target_images=None, target_format=None):
+    images_filenames, target_images = _get_images_filenames(directory, target_images, target_format)
 
     images_sizes = {}
     for i, img_id in enumerate(target_images):
@@ -98,7 +104,10 @@ def get_images_sizes(directory, target_images=None):
         img = load_image(img_filename)
         images_sizes[img_id] = img.shape[:2]
 
-    logging.info('Image sizes: %s', len(images_sizes))
+        if (i + 1) % 10 == 0:
+            logging.info('Loaded: %s/%s [%.2f]', (i + 1), len(target_images), 100 * (i + 1) / len(target_images))
+
+    logging.info('Image sizes: %s - %s', target_format or '*', len(images_sizes))
     return images_sizes
 
 
@@ -109,8 +118,11 @@ def load_sample_submission(filename):
     return data
 
 
-def convert_mask_to_one_hot(Y):
+def convert_masks_to_softmax(Y, classes_to_skip=None):
     batch_size, img_height, img_width, nb_classes = Y.shape
+
+    if classes_to_skip is None:
+        classes_to_skip = set()
 
     # Classes:
     # 1 - Buildings
@@ -139,13 +151,17 @@ def convert_mask_to_one_hot(Y):
     classes_mul = [classes_mul[c+1] for c in range(nb_classes)]
 
     Y_prior = Y * classes_mul
-
     Y_prior *= 2
-    no_class = np.full((batch_size, img_height, img_width), 1, dtype=np.uint8)
-    Y_one_hot = np.insert(Y_prior, 0, no_class, axis=3)
-    Y_one_hot = Y_one_hot.argmax(axis=-1)
 
-    return Y_one_hot
+    # select only needed classes
+    needed_classes = [c for c in range(nb_classes) if c + 1 not in classes_to_skip]
+    Y_prior_filtered = Y_prior[:,:,:,needed_classes]
+
+    no_class = np.full((batch_size, img_height, img_width), 1, dtype=np.uint8)
+    Y_no_class = np.insert(Y_prior_filtered, 0, no_class, axis=3)
+    Y_softmax = Y_no_class.argmax(axis=-1)
+
+    return Y_softmax
 
 
 def convert_softmax_to_masks(Y_probs):
@@ -163,3 +179,102 @@ def convert_softmax_to_masks(Y_probs):
 
     mask_joined = np.stack(masks, axis=-1)
     return mask_joined
+
+
+def pansharpen(m, pan, method='browley', W=0.1, all_data=False):
+    """From https://www.kaggle.com/resolut/dstl-satellite-imagery-feature-detection/panchromatic-sharpening-simple/discussion"""
+
+    # m.shape - (837, 849, 8)
+    # pan.shape - (3348, 3396, 1)
+
+    # M bands order:
+    # 0 - Coastal
+    # 1 - Blue
+    # 2 - Green
+    # 3 - Yellow
+    # 4 - Red
+    # 5 - Red Edge
+    # 6 - Near IR1
+    # 7 - Near IR2
+
+    # reshape pan
+    pan = np.reshape(pan, (pan.shape[0], pan.shape[1]))
+
+    # get M bands
+    rgbn = np.empty((m.shape[0], m.shape[1], 4))
+    rgbn[:, :, 0] = m[:, :, 4]  # red
+    rgbn[:, :, 1] = m[:, :, 2]  # green
+    rgbn[:, :, 2] = m[:, :, 1]  # blue
+    rgbn[:, :, 3] = m[:, :, 6]  # NIR-1
+
+    # scaled them
+    rgbn_scaled = np.empty((m.shape[0] * 4, m.shape[1] * 4, 4))
+
+    for i in range(4):
+        img = rgbn[:, :, i]
+        scaled = skimage.transform.rescale(img, (4, 4))
+        rgbn_scaled[:, :, i] = scaled
+
+    # check size and crop for pan band
+    if pan.shape[0] < rgbn_scaled.shape[0]:
+        rgbn_scaled = rgbn_scaled[:pan.shape[0], :, :]
+    else:
+        pan = pan[:rgbn_scaled.shape[0], :]
+
+    if pan.shape[1] < rgbn_scaled.shape[1]:
+        rgbn_scaled = rgbn_scaled[:, :pan.shape[1], :]
+    else:
+        pan = pan[:, :rgbn_scaled.shape[1]]
+
+    R = rgbn_scaled[:, :, 0]
+    G = rgbn_scaled[:, :, 1]
+    B = rgbn_scaled[:, :, 2]
+    I = rgbn_scaled[:, :, 3]
+
+    image = None
+
+    if method == 'simple_browley':
+        all_in = R + G + B
+        prod = np.multiply(all_in, pan)
+
+        r = np.multiply(R, pan / all_in)[:, :, np.newaxis]
+        g = np.multiply(G, pan / all_in)[:, :, np.newaxis]
+        b = np.multiply(B, pan / all_in)[:, :, np.newaxis]
+
+        image = np.concatenate([r, g, b], axis=2)
+
+    if method == 'sample_mean':
+        r = 0.5 * (R + pan)[:, :, np.newaxis]
+        g = 0.5 * (G + pan)[:, :, np.newaxis]
+        b = 0.5 * (B + pan)[:, :, np.newaxis]
+
+        image = np.concatenate([r, g, b], axis=2)
+
+    if method == 'esri':
+        ADJ = pan - rgbn_scaled.mean(axis=2)
+        r = (R + ADJ)[:, :, np.newaxis]
+        g = (G + ADJ)[:, :, np.newaxis]
+        b = (B + ADJ)[:, :, np.newaxis]
+        i = (I + ADJ)[:, :, np.newaxis]
+
+        image = np.concatenate([r, g, b, i], axis=2)
+
+    if method == 'browley':
+        DNF = (pan - W * I) / (W * R + W * G + W * B)
+
+        r = (R * DNF)[:, :, np.newaxis]
+        g = (G * DNF)[:, :, np.newaxis]
+        b = (B * DNF)[:, :, np.newaxis]
+        i = (I * DNF)[:, :, np.newaxis]
+
+        image = np.concatenate([r, g, b, i], axis=2)
+
+    if method == 'hsv':
+        hsv = skimage.color.rgb2hsv(rgbn_scaled[:, :, :3])
+        hsv[:, :, 2] = pan - I * W
+        image = skimage.color.hsv2rgb(hsv)
+
+    if all_data:
+        return rgbn_scaled, image, I
+    else:
+        return image

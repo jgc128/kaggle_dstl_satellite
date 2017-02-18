@@ -28,25 +28,21 @@ def round_coords(coords):
     return np.array(coords).round().astype(np.int32)
 
 
-def create_mask_from_metadata(img_metadata, polygon_metadata):
+def create_mask_from_polygons(img_size, polygons):
     """Adopted from https://www.kaggle.com/lopuhin/dstl-satellite-imagery-feature-detection/full-pipeline-demo-poly-pixels-ml-poly"""
-    image_size = (img_metadata['height'], img_metadata['width'])
-    multipolygon = shapely.wkt.loads(polygon_metadata['ploy_scaled'])
 
-    image_mask = np.zeros(image_size, np.uint8)
+    image_mask = np.zeros(img_size, np.uint8)
 
-    if not multipolygon:
+    if polygons is None:
         return image_mask
 
-    exteriors = [round_coords(poly.exterior.coords) for poly in multipolygon]
-    interiors = [round_coords(pi.coords) for poly in multipolygon for pi in poly.interiors]
+    exteriors = [round_coords(poly.exterior.coords) for poly in polygons]
+    interiors = [round_coords(pi.coords) for poly in polygons for pi in poly.interiors]
 
     cv2.fillPoly(image_mask, exteriors, 1)
     cv2.fillPoly(image_mask, interiors, 0)
 
     return image_mask
-
-
 
 
 def mask_to_polygons(mask, epsilon=5, min_area=1.0):
@@ -96,10 +92,12 @@ def mask_to_polygons(mask, epsilon=5, min_area=1.0):
     else:
         return MultiPolygon()
 
+
 def mask_to_polygons_v2(mask, min_area=1.0):
-    all_polygons=[]
+    all_polygons = []
     discarded = 0
-    for shape, value in rasterio.features.shapes(mask.astype(np.int16), mask = (mask==1), transform = rasterio.Affine(1.0, 0, 0, 0, 1.0, 0)):
+    for shape, value in rasterio.features.shapes(mask.astype(np.int16), mask=(mask == 1),
+                                                 transform=rasterio.Affine(1.0, 0, 0, 0, 1.0, 0)):
         poly = shapely.geometry.shape(shape)
         if poly.area > min_area:
             all_polygons.append(poly)
@@ -116,6 +114,7 @@ def mask_to_polygons_v2(mask, min_area=1.0):
         all_polygons = shapely.geometry.MultiPolygon([all_polygons])
 
     return all_polygons
+
 
 def create_polygons_from_mask(mask, image_metadata, scale=True):
     poly = mask_to_polygons(mask, min_area=1.0)
@@ -157,42 +156,45 @@ def sample_random_corner(img_height, img_width, patch_size, kind, val_size):
         np.random.randint(min_height, max_height),
         np.random.randint(min_width, max_width)
     )
-    img_c2 = (img_c1[0] + patch_size[0], img_c1[1] + patch_size[1])
 
-    return img_c1, img_c2
-
-
-def sample_patch(img_data, img_mask_data, patch_size, kind='train', val_size = 256):
-    img_height = img_mask_data.shape[0]
-    img_width = img_mask_data.shape[1]
-
-    img_c1, img_c2 = sample_random_corner(img_height, img_width, patch_size, kind, val_size)
-
-    img_patch = img_data[img_c1[0]:img_c2[0], img_c1[1]:img_c2[1], :]
-    img_mask = img_mask_data[img_c1[0]:img_c2[0], img_c1[1]:img_c2[1], :]
-
-    return img_patch, img_mask
+    return img_c1
 
 
+def sample_patch(img_data, patch_sizes, kind='train', val_size=256):
+    img_height = img_data[0].shape[0]
+    img_width = img_data[0].shape[1]
+    patch_size = patch_sizes[0]
 
-def sample_patches(images, images_data, images_masks_stacked, patch_size, nb_samples, kind='train', val_size = 256):
-    nb_channels = images_data[images[0]].shape[2]
-    nb_classes = images_masks_stacked[images[0]].shape[2]
+    base_c1 = sample_random_corner(img_height, img_width, patch_size, kind, val_size)
+    scales = [(patch_sizes[0][0] / p[0], patch_sizes[0][1] / p[1],) for p in patch_sizes]
 
-    X = np.zeros((nb_samples, patch_size[0], patch_size[1], nb_channels))
-    Y = np.zeros((nb_samples, patch_size[0], patch_size[1], nb_classes), dtype=np.uint8)
+    img_c1 = [(int(base_c1[0] / scales[i][0]), int(base_c1[1] / scales[i][1])) for i, p in enumerate(patch_sizes)]
+    img_c2 = [(img_c1[i][0] + patch_sizes[i][0], img_c1[i][1] + patch_sizes[i][1]) for i, p in enumerate(patch_sizes)]
+    # img_c2 = (img_c1[0] + patch_size[0], img_c1[1] + patch_size[1])
+
+    img_patch = [d[img_c1[i][0]:img_c2[i][0], img_c1[i][1]:img_c2[i][1], :] for i, d in enumerate(img_data)]
+
+    return img_patch
+
+
+def sample_patches(images, data, patch_sizes, nb_samples, kind='train', val_size=256):
+    nb_data = len(data)
+    nb_data_channels = [d[images[0]].shape[2] for d in data]
+    data_sampled = [
+        np.zeros((nb_samples, patch_sizes[i][0], patch_sizes[i][1], nb_data_channels[i]), dtype=d[images[0]].dtype)
+        for i, d in enumerate(data)
+        ]
 
     for i in range(nb_samples):
         img_id = np.random.choice(images)
-        img_data = images_data[img_id]
-        img_mask_data = images_masks_stacked[img_id]
+        img_data = [d[img_id] for d in data]
 
-        img_patch, img_mask = sample_patch(img_data, img_mask_data, patch_size, kind=kind, val_size=val_size)
+        img_patch = sample_patch(img_data, patch_sizes, kind=kind, val_size=val_size)
 
-        X[i] = img_patch
-        Y[i] = img_mask
+        for k in range(nb_data):
+            data_sampled[k][i] = img_patch[k]
 
-    return X, Y
+    return data_sampled
 
 
 def split_image_to_patches(image_data, patch_size, leftovers=True, add_random=0):
@@ -214,7 +216,6 @@ def split_image_to_patches(image_data, patch_size, leftovers=True, add_random=0)
 
             patches.append(patch)
             patches_coord.append(c1)
-
 
     # deal with leftovers
     if leftovers:
@@ -243,7 +244,7 @@ def split_image_to_patches(image_data, patch_size, leftovers=True, add_random=0)
     return patches, patches_coord
 
 
-def join_mask_patches(patches, patches_coord, image_height, image_width, softmax=False, normalization = False):
+def join_mask_patches(patches, patches_coord, image_height, image_width, softmax=False, normalization=False):
     def np_softmax(x, axis=-1):
         original_shape = x.shape
         nb_classes = original_shape[axis]
@@ -264,7 +265,8 @@ def join_mask_patches(patches, patches_coord, image_height, image_width, softmax
 
     for i, c1 in enumerate(patches_coord):
         image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :] += patches[i]
-        counts[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :] += np.ones_like(patches[i], dtype=np.float32)
+        counts[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :] += np.ones_like(patches[i],
+                                                                                            dtype=np.float32)
 
     if softmax:
         image_data = np_softmax(image_data)
@@ -273,3 +275,19 @@ def join_mask_patches(patches, patches_coord, image_height, image_width, softmax
         image_data = image_data / counts
 
     return image_data
+
+def jaccard_coef(y_pred, y_true, mean=True):
+    # inspired by https://www.kaggle.com/drn01z3/dstl-satellite-imagery-feature-detection/end-to-end-baseline-with-u-net-keras
+
+    epsilon = 0.00001
+
+    intersection = np.sum(y_pred * y_true, axis=(0,1,2))
+    sum_tmp = np.sum(y_pred + y_true, axis=(0,1,2))
+    union = sum_tmp - intersection
+
+    jaccard = (intersection + epsilon) / (union + epsilon)
+
+    if mean:
+        jaccard = np.mean(jaccard)
+
+    return jaccard
