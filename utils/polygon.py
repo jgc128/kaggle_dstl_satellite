@@ -132,8 +132,8 @@ def sample_random_corner(img_height, img_width, patch_size, kind, val_size):
     if kind == 'train':
         min_height = 0
         min_width = val_size
-        max_height = img_height - patch_size[0]
-        max_width = img_width - patch_size[1]
+        max_height = img_height - patch_size[0] - 4 # just in case
+        max_width = img_width - patch_size[1] - 4 # just in case
     elif kind == 'val':
         min_height = 0
         min_width = 0
