@@ -145,6 +145,9 @@ class CombinedModel(BaseModel):
         input_sharpened = self.input_dict['X_sharpened']
         input_sharpened_shape = tf.shape(input_sharpened)
 
+        input_m = self.input_dict['X_m']
+        input_m_shape = tf.shape(input_m)
+
         targets = self.input_dict['Y']
         targets_one_hot = tf.one_hot(targets, self.nb_classes + 1)
 
@@ -163,6 +166,11 @@ class CombinedModel(BaseModel):
             net = slim.conv2d(net, 128, [3, 3], scope='conv2_2')
             net = slim.max_pool2d(net, [2, 2], scope='pool2_1')
             pool2 = net
+
+            # combine pool2 and M bands
+            net_m = slim.conv2d(input_m, 64, [3, 3], scope='conv1_1_m')
+            net_m = slim.conv2d(net_m, 128, [3, 3], scope='conv1_2_m')
+            net = tf.concat_v2([net, net_m], axis=3)
 
             net = slim.conv2d(net, 256, [3, 3], scope='conv3_1')
             net = slim.conv2d(net, 256, [3, 3], scope='conv3_2')
@@ -269,6 +277,11 @@ def main(model_name):
     needed_classes_names = [c for i, c in enumerate(classes_names) if i + 1 not in classes_to_skip]
     logging.info('Skipping classes: %s', classes_to_skip)
 
+    # skip M bands that were pansharpened
+    m_bands_to_skip = {4, 2, 1, 6}
+    needed_m_bands = [i for i in range(nb_channels_m) if i not in m_bands_to_skip]
+    logging.info('Skipping M bands: %s', m_bands_to_skip)
+
     patch_size = (224, 224,)
     patch_size_sharpened = (patch_size[0], patch_size[1],)
     patch_size_m = (patch_size_sharpened[0] // 4, patch_size_sharpened[1] // 4,)
@@ -290,7 +303,7 @@ def main(model_name):
 
     # TODO: not a fixed size
     model.add_input('X_sharpened', [patch_size_sharpened[0], patch_size_sharpened[1], nb_channels_sharpened])
-    model.add_input('X_m', [patch_size_m[0], patch_size_m[1], nb_channels_m])
+    model.add_input('X_m', [patch_size_m[0], patch_size_m[1], nb_channels_m - len(m_bands_to_skip)])
     model.add_input('Y', [patch_size[0], patch_size[1], ], dtype=tf.uint8)
 
     model.build_model()
@@ -311,12 +324,14 @@ def main(model_name):
 
             Y, X_sharpened, X_m = patches[0], patches[1], patches[2]
             Y_softmax = convert_masks_to_softmax(Y, classes_to_skip=classes_to_skip)
+            X_m = X_m[:, :, :, needed_m_bands]
 
             data_dict_train = {'X_sharpened': X_sharpened, 'X_m': X_m, 'Y': Y_softmax}
             model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
 
             # validate the model
             if iteration_number % 5 == 0:
+
                 # calc jaccard val
                 patches_val = sample_patches(images,
                                              [images_masks_stacked, images_data_sharpened, images_data_m],
@@ -324,6 +339,7 @@ def main(model_name):
                                              nb_samples_val, kind='val', val_size=val_size)
 
                 Y_val, X_sharpened_val, X_m_val = patches_val[0], patches_val[1], patches_val[2]
+                X_m_val = X_m_val[:, :, :, needed_m_bands]
 
                 data_dict_val = {'X_sharpened': X_sharpened_val, 'X_m': X_m_val, }
                 Y_val_pred_probs = model.predict(data_dict_val, batch_size=batch_size)
@@ -341,6 +357,7 @@ def main(model_name):
 
                 Y_train_val, X_sharpened_train_val, X_m_train_val = \
                     patches_train_val[0], patches_train_val[1], patches_train_val[2]
+                X_m_train_val = X_m_train_val[:, :, :, needed_m_bands]
 
                 data_dict_val = {'X_sharpened': X_sharpened_train_val, 'X_m': X_m_train_val, }
                 Y_train_val_pred_probs = model.predict(data_dict_val, batch_size=batch_size)
