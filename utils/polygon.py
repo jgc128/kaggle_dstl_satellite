@@ -121,8 +121,8 @@ def create_polygons_from_mask(mask, image_metadata, scale=True):
     # poly = mask_to_polygons_v2(mask)
 
     if scale:
-        x_scaler = image_metadata['x_scaler']
-        y_scaler = image_metadata['y_scaler']
+        x_scaler = image_metadata['x_rgb_scaler']
+        y_scaler = image_metadata['y_rgb_scaler']
         poly = shapely.affinity.scale(poly, xfact=1.0 / x_scaler, yfact=1.0 / y_scaler, origin=(0, 0, 0))
 
     return poly
@@ -132,8 +132,8 @@ def sample_random_corner(img_height, img_width, patch_size, kind, val_size):
     if kind == 'train':
         min_height = 0
         min_width = val_size
-        max_height = img_height - patch_size[0] - 4 # just in case
-        max_width = img_width - patch_size[1] - 4 # just in case
+        max_height = img_height - patch_size[0] - 4  # just in case
+        max_width = img_width - patch_size[1] - 4  # just in case
     elif kind == 'val':
         min_height = 0
         min_width = 0
@@ -160,17 +160,22 @@ def sample_random_corner(img_height, img_width, patch_size, kind, val_size):
     return img_c1
 
 
+def get_scaled_patches(base_c1, patch_sizes):
+    scales = [(patch_sizes[0][0] / p[0], patch_sizes[0][1] / p[1],) for p in patch_sizes]
+
+    img_c1 = [(int(base_c1[0] / scales[i][0]), int(base_c1[1] / scales[i][1])) for i, p in enumerate(patch_sizes)]
+    img_c2 = [(img_c1[i][0] + patch_sizes[i][0], img_c1[i][1] + patch_sizes[i][1]) for i, p in enumerate(patch_sizes)]
+
+    return img_c1, img_c2
+
+
 def sample_patch(img_data, patch_sizes, kind='train', val_size=256):
     img_height = img_data[0].shape[0]
     img_width = img_data[0].shape[1]
     patch_size = patch_sizes[0]
 
     base_c1 = sample_random_corner(img_height, img_width, patch_size, kind, val_size)
-    scales = [(patch_sizes[0][0] / p[0], patch_sizes[0][1] / p[1],) for p in patch_sizes]
-
-    img_c1 = [(int(base_c1[0] / scales[i][0]), int(base_c1[1] / scales[i][1])) for i, p in enumerate(patch_sizes)]
-    img_c2 = [(img_c1[i][0] + patch_sizes[i][0], img_c1[i][1] + patch_sizes[i][1]) for i, p in enumerate(patch_sizes)]
-    # img_c2 = (img_c1[0] + patch_size[0], img_c1[1] + patch_size[1])
+    img_c1, img_c2 = get_scaled_patches(base_c1, patch_sizes)
 
     img_patch = [d[img_c1[i][0]:img_c2[i][0], img_c1[i][1]:img_c2[i][1], :] for i, d in enumerate(img_data)]
 
@@ -197,51 +202,58 @@ def sample_patches(images, data, patch_sizes, nb_samples, kind='train', val_size
     return data_sampled
 
 
-def split_image_to_patches(image_data, patch_size, leftovers=True, add_random=0):
-    patches = []
-    patches_coord = []
+def split_image_to_patches(data, patch_sizes, overlap=0.5):
+    img_height = data[0].shape[0] - 4 # just in case
+    img_width = data[0].shape[1] - 4 # just in case
+    patch_size = patch_sizes[0]
 
-    nb_patches_height = int(image_data.shape[0] / patch_size[0])
-    nb_patches_width = int(image_data.shape[1] / patch_size[1])
+    step_size = (int(patch_size[0] * overlap), int(patch_size[1] * overlap))
+    nb_steps_height = (img_height - patch_size[0]) // step_size[0] + 1
+    nb_steps_width = (img_width - patch_size[1]) // step_size[1] + 1
 
-    # TODO: deal with leftovers
-    leftover_height = image_data.shape[0] - nb_patches_height * patch_size[0]
-    leftover_width = image_data.shape[1] - nb_patches_width * patch_size[1]
+    patches = [[] for _ in range(len(data))]
+    patches_coordinates = [[] for _ in range(len(data))]
 
     # tile
-    for i in range(nb_patches_height):
-        for j in range(nb_patches_width):
-            c1 = (i * patch_size[0], j * patch_size[1])
-            patch = image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :]
+    for i in range(nb_steps_height):
+        for j in range(nb_steps_width):
+            base_c1 = (i * step_size[0], j * step_size[1])
+            img_c1, img_c2 = get_scaled_patches(base_c1, patch_sizes)
 
-            patches.append(patch)
-            patches_coord.append(c1)
+            for k, img_data in enumerate(data):
+                img_patch = img_data[img_c1[k][0]:img_c2[k][0], img_c1[k][1]:img_c2[k][1], :]
+                patches[k].append(img_patch)
+                patches_coordinates[k].append(img_c1[k])
 
-    # deal with leftovers
-    if leftovers:
-        for i in range(nb_patches_height):
-            c1 = (i * patch_size[0], image_data.shape[1] - patch_size[1])
-            patch = image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :]
+    # leftovers - width
+    for i in range(nb_steps_height):
+        base_c1 = (i * step_size[0], img_width - patch_size[1])
+        img_c1, img_c2 = get_scaled_patches(base_c1, patch_sizes)
 
-            patches.append(patch)
-            patches_coord.append(c1)
+        for k, img_data in enumerate(data):
+            img_patch = img_data[img_c1[k][0]:img_c2[k][0], img_c1[k][1]:img_c2[k][1], :]
+            patches[k].append(img_patch)
+            patches_coordinates[k].append(img_c1[k])
 
-        for j in range(nb_patches_width):
-            c1 = (image_data.shape[0] - patch_size[0], j * patch_size[0])
-            patch = image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :]
+    # leftovers - height
+    for j in range(nb_steps_width):
+        base_c1 = (img_height - patch_size[0], j * step_size[1])
+        img_c1, img_c2 = get_scaled_patches(base_c1, patch_sizes)
 
-            patches.append(patch)
-            patches_coord.append(c1)
+        for k, img_data in enumerate(data):
+            img_patch = img_data[img_c1[k][0]:img_c2[k][0], img_c1[k][1]:img_c2[k][1], :]
+            patches[k].append(img_patch)
+            patches_coordinates[k].append(img_c1[k])
 
-    # add random patches
-    for i in range(add_random):
-        c1, _ = sample_random_corner(image_data.shape[0], image_data.shape[1], patch_size, kind='all', val_size=0)
-        patch = image_data[c1[0]:c1[0] + patch_size[0], c1[1]:c1[1] + patch_size[1], :]
+    # leftovers - bottom right corner
+    base_c1 = (img_height - patch_size[0], img_width - patch_size[1])
+    img_c1, img_c2 = get_scaled_patches(base_c1, patch_sizes)
+    for k, img_data in enumerate(data):
+        img_patch = img_data[img_c1[k][0]:img_c2[k][0], img_c1[k][1]:img_c2[k][1], :]
+        patches[k].append(img_patch)
+        patches_coordinates[k].append(img_c1[k])
 
-        patches.append(patch)
-        patches_coord.append(c1)
-
-    return patches, patches_coord
+    return patches, patches_coordinates
 
 
 def join_mask_patches(patches, patches_coord, image_height, image_width, softmax=False, normalization=False):
@@ -276,13 +288,14 @@ def join_mask_patches(patches, patches_coord, image_height, image_width, softmax
 
     return image_data
 
+
 def jaccard_coef(y_pred, y_true, mean=True):
     # inspired by https://www.kaggle.com/drn01z3/dstl-satellite-imagery-feature-detection/end-to-end-baseline-with-u-net-keras
 
     epsilon = 0.00001
 
-    intersection = np.sum(y_pred * y_true, axis=(0,1,2))
-    sum_tmp = np.sum(y_pred + y_true, axis=(0,1,2))
+    intersection = np.sum(y_pred * y_true, axis=(0, 1, 2))
+    sum_tmp = np.sum(y_pred + y_true, axis=(0, 1, 2))
     union = sum_tmp - intersection
 
     jaccard = (intersection + epsilon) / (union + epsilon)

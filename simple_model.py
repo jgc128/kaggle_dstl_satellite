@@ -242,7 +242,7 @@ def main(model_name):
     classes = np.arange(1, nb_classes + 1)
     logging.info('Classes: %s', nb_classes)
 
-    # load images data and masks
+    # load images data
     images_data_m = load_pickle(IMAGES_NORMALIZED_M_FILENAME)
     images_data_sharpened = load_pickle(IMAGES_NORMALIZED_SHARPENED_FILENAME)
     logging.info('Images: %s, %s', len(images_data_m), len(images_data_sharpened))
@@ -396,10 +396,26 @@ def predict(kind, model_name, global_step):
 
     logging.info('Prediction mode')
 
-    # load images metadata
-    images_metadata, channels_mean, channels_std = load_pickle(IMAGES_METADATA_FILENAME)
-    logging.info('Images metadata: %s, mean: %s, std: %s', len(images_metadata), channels_mean.shape,
-                 channels_std.shape)
+    nb_channels_m = 8
+    nb_channels_sharpened = 4
+    nb_classes = 10
+
+    # skip vehicles and misc manmade structures
+    classes_to_skip = {2, 9, 10}
+    logging.info('Skipping classes: %s', classes_to_skip)
+
+    # skip M bands that were pansharpened
+    m_bands_to_skip = {4, 2, 1, 6}
+    needed_m_bands = [i for i in range(nb_channels_m) if i not in m_bands_to_skip]
+    logging.info('Skipping M bands: %s', m_bands_to_skip)
+
+    patch_size = (224, 224,)
+    patch_size_sharpened = (patch_size[0], patch_size[1],)
+    patch_size_m = (patch_size_sharpened[0] // 4, patch_size_sharpened[1] // 4,)
+    logging.info('Patch sizes: %s, %s, %s', patch_size, patch_size_sharpened, patch_size_m)
+
+    images_metadata = load_pickle(IMAGES_METADATA_FILENAME)
+    logging.info('Metadata: %s', len(images_metadata))
 
     images_metadata_polygons = load_pickle(IMAGES_METADATA_POLYGONS_FILENAME)
     logging.info('Polygons metadata: %s', len(images_metadata_polygons))
@@ -418,11 +434,8 @@ def predict(kind, model_name, global_step):
     nb_target_images = len(target_images)
     logging.info('Target images: %s - %s', kind, nb_target_images)
 
-    patch_size = (224, 224,)
-    nb_channels = 3
-    nb_classes = 10
 
-    batch_size = 30
+    batch_size = 25
 
     # create and load model
     sess_config = tf.ConfigProto(inter_op_parallelism_threads=4, intra_op_parallelism_threads=4)
@@ -430,15 +443,16 @@ def predict(kind, model_name, global_step):
     sess = tf.Session(config=sess_config)
 
     model_params = {
-        'nb_classes': nb_classes,
+        'nb_classes': nb_classes - len(classes_to_skip),
     }
-    model = SimpleModel(**model_params)
+    model = CombinedModel(**model_params)
     model.set_session(sess)
     # model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, 'simple_model'))
 
     # TODO: not a fixed size
-    model.add_input('X', [patch_size[0], patch_size[0], nb_channels])
-    model.add_input('Y', [patch_size[0], patch_size[1], nb_classes])  # , dtype=tf.uint8
+    model.add_input('X_sharpened', [patch_size_sharpened[0], patch_size_sharpened[1], nb_channels_sharpened])
+    model.add_input('X_m', [patch_size_m[0], patch_size_m[1], nb_channels_m - len(m_bands_to_skip)])
+    model.add_input('Y', [patch_size[0], patch_size[1], ], dtype=tf.uint8)
 
     model.build_model()
 
@@ -448,22 +462,43 @@ def predict(kind, model_name, global_step):
     logging.info('Model restored: %s', os.path.basename(model_filename))
 
     for img_number, img_id in enumerate(target_images):
-        img_filename = os.path.join(IMAGES_NORMALIZED_DATA_DIR, img_id + '.npy')
-        img_data = np.load(img_filename)
+        img_filename = os.path.join(IMAGES_NORMALIZED_DATA_DIR, img_id + '.pkl')
+        img_normalized_sharpened, img_normalized_m = load_pickle(img_filename)
 
-        patches, patches_coord = split_image_to_patches(img_data, patch_size, leftovers=True, add_random=200)
+        patches, patches_coord = split_image_to_patches(
+            [img_normalized_sharpened, img_normalized_m],
+            [patch_size_sharpened, patch_size_m],
+            overlap=0.5)
 
-        X = np.array(patches)
-        data_dict = {'X': X}
-        classes_prob = model.predict(data_dict, batch_size=batch_size)
-        masks = np.round(np.array(classes_prob))
-        masks_joined = join_mask_patches(masks, patches_coord, img_data.shape[0], img_data.shape[1],
-                                         softmax=False, normalization=True)
+        X_sharpened = np.array(patches[0])
+        X_m = np.array(patches[1])
+        X_m = X_m[:, :, :, needed_m_bands]
 
-        masks_joined = np.round(masks_joined)
+        data_dict = {'X_sharpened': X_sharpened, 'X_m': X_m, }
+        classes_probs_patches = model.predict(data_dict, batch_size=batch_size)
 
-        mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, img_id + '.npy')
-        np.save(mask_filename, masks_joined)
+        classes_probs = join_mask_patches(
+            classes_probs_patches, patches_coord[0],
+            images_metadata[img_id]['height_rgb'], images_metadata[img_id]['width_rgb'],
+            softmax=True, normalization=False)
+
+        masks_without_excluded = convert_softmax_to_masks(classes_probs)
+
+        # join masks and put zeros insted of excluded classes
+        zeros_filler = np.zeros_like(masks_without_excluded[:,:,0])
+        masks_all = []
+        j = 0
+        for i in range(nb_classes):
+            if i + 1 not in classes_to_skip:
+                masks_all.append(masks_without_excluded[:,:,j])
+                j += 1
+            else:
+                masks_all.append(zeros_filler)
+
+        masks = np.stack(masks_all, axis=-1)
+
+        mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, '{0}_{1}.npy'.format(img_id, model_name))
+        np.save(mask_filename, masks)
 
         logging.info('Predicted: %s/%s [%.2f]',
                      img_number + 1, nb_target_images, 100 * (img_number + 1) / nb_target_images)
@@ -472,16 +507,16 @@ def predict(kind, model_name, global_step):
 if __name__ == '__main__':
     task = 'main'
     model_name = 'combined_model_jaccard_softmax_without_small'  # 'resnet' 'simple_model_jaccard_sigmoid'
+    global_step = 41310
+    kind = 'test'
 
     if len(sys.argv) > 1:
         task = sys.argv[1]
 
     if task == 'predict':
-        kind = 'test'
         if len(sys.argv) > 2:
             kind = sys.argv[2]
 
-        global_step = 555
         if len(sys.argv) > 3:
             global_step = sys.argv[3]
 

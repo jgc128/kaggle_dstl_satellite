@@ -12,7 +12,7 @@ import pandas as pd
 from config import SAMPLE_SUBMISSION_FILENAME, IMAGES_PREDICTION_MASK_DIR, IMAGES_METADATA_FILENAME, SUBMISSION_DIR
 from utils.data import load_sample_submission, load_pickle
 from utils.matplotlib import matplotlib_setup, plot_mask
-from utils.polygon import create_polygons_from_mask, create_mask_from_metadata
+from utils.polygon import create_polygons_from_mask
 
 
 def save_submission(polygons, submission_order, filename, skip_classes=None):
@@ -57,21 +57,21 @@ def create_image_polygons(img_masks, img_metadata, scale=True, skip_classes=None
     return polygons_dict
 
 
-def main():
+def main(model_name):
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s : %(levelname)s : %(module)s : %(message)s", datefmt="%d-%m-%Y %H:%M:%S"
     )
 
     matplotlib_setup()
 
-    skip_classes = None # {9, 10}
+    skip_classes = None
     double_pass = False
 
     logging.info('Skip classes: %s', skip_classes)
     logging.info('Mode: %s', 'double pass' if double_pass else 'single pass')
 
     # load images metadata
-    images_metadata, _, _ = load_pickle(IMAGES_METADATA_FILENAME)
+    images_metadata = load_pickle(IMAGES_METADATA_FILENAME)
     logging.info('Images metadata: %s', len(images_metadata))
 
     sample_submission = load_sample_submission(SAMPLE_SUBMISSION_FILENAME)
@@ -86,7 +86,7 @@ def main():
     for i, img_id in enumerate(target_images):
         img_metadata = images_metadata[img_id]
 
-        mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, img_id + '.npy')
+        mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, '{0}_{1}.npy'.format(img_id, model_name))
         if os.path.isfile(mask_filename):
             img_mask = np.load(mask_filename)
         else:
@@ -95,16 +95,17 @@ def main():
         if not double_pass:
             img_polygons = create_image_polygons(img_mask, img_metadata, scale=True, skip_classes=skip_classes)
         else:
-            img_polygons = create_image_polygons(img_mask, img_metadata, scale=False, skip_classes=skip_classes)
-
-            img_mask_reconstructed = []
-            for class_type in sorted(img_polygons.keys()):
-                ploy_metadata = {'ploy_scaled': img_polygons[class_type].wkt}
-                img_class_mask_reconstructed = create_mask_from_metadata(img_metadata, ploy_metadata)
-                img_mask_reconstructed.append(img_class_mask_reconstructed)
-
-            img_mask = np.stack(img_mask_reconstructed, axis=-1)
-            img_polygons = create_image_polygons(img_mask, img_metadata, scale=True, skip_classes=skip_classes)
+            # img_polygons = create_image_polygons(img_mask, img_metadata, scale=False, skip_classes=skip_classes)
+            #
+            # img_mask_reconstructed = []
+            # for class_type in sorted(img_polygons.keys()):
+            #     ploy_metadata = {'ploy_scaled': img_polygons[class_type].wkt}
+            #     img_class_mask_reconstructed = create_mask_from_metadata(img_metadata, ploy_metadata)
+            #     img_mask_reconstructed.append(img_class_mask_reconstructed)
+            #
+            # img_mask = np.stack(img_mask_reconstructed, axis=-1)
+            # img_polygons = create_image_polygons(img_mask, img_metadata, scale=True, skip_classes=skip_classes)
+            raise NotImplementedError('Double pass is not implemented yet')
 
         polygons[img_id] = img_polygons
 
@@ -112,9 +113,10 @@ def main():
             logging.info('Processed images: %s/%s [%.2f]', i + 1, len(target_images),
                          100 * (i + 1) / len(target_images))
 
-    submission_filename = os.path.join(SUBMISSION_DIR, 'simple_model_submission.csv')
+    submission_filename = os.path.join(SUBMISSION_DIR, 'submission_{}.csv'.format(model_name))
     save_submission(polygons, submission_order, submission_filename, skip_classes=skip_classes)
 
 
 if __name__ == '__main__':
-    main()
+    model_name = 'combined_model_jaccard_softmax_without_small'
+    main(model_name)
