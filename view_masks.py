@@ -2,14 +2,16 @@ import logging
 import os
 
 import numpy as np
+import cv2
 
-from config import IMAGES_METADATA_FILENAME, IMAGES_PREDICTION_MASK_DIR, IMAGES_NORMALIZED_FILENAME, \
-    IMAGES_MASKS_FILENAME, IMAGES_NORMALIZED_DATA_DIR
+from config import IMAGES_METADATA_FILENAME, IMAGES_PREDICTION_MASK_DIR, \
+    IMAGES_MASKS_FILENAME, IMAGES_NORMALIZED_DATA_DIR, IMAGES_NORMALIZED_M_FILENAME, \
+    IMAGES_NORMALIZED_SHARPENED_FILENAME, IMAGES_MEANS_STDS_FILENAME, CLASSES_NAMES
 from config import IMAGES_METADATA_POLYGONS_FILENAME
 from create_submission import create_image_polygons
 from utils.data import load_pickle
-from utils.matplotlib import matplotlib_setup, plot_image, plot_polygons
-from utils.polygon import jaccard_coef, create_mask_from_metadata
+from utils.matplotlib import matplotlib_setup, plot_image, plot_polygons, plot_two_masks
+from utils.polygon import jaccard_coef, create_mask_from_polygons, simplify_mask
 
 
 def main(kind):
@@ -19,18 +21,22 @@ def main(kind):
 
     matplotlib_setup()
 
-    # load images
-    images_data = load_pickle(IMAGES_NORMALIZED_FILENAME)
-    images_masks = load_pickle(IMAGES_MASKS_FILENAME)
-    logging.info('Images: %s, masks: %s', len(images_data), len(images_masks))
+    images_data_m = load_pickle(IMAGES_NORMALIZED_M_FILENAME)
+    images_data_sharpened = load_pickle(IMAGES_NORMALIZED_SHARPENED_FILENAME)
+    logging.info('Images: %s, %s', len(images_data_m), len(images_data_sharpened))
 
-    # load images metadata
-    images_metadata, channels_mean, channels_std = load_pickle(IMAGES_METADATA_FILENAME)
-    logging.info('Images metadata: %s, mean: %s, std: %s', len(images_metadata), channels_mean.shape,
-                 channels_std.shape)
+    images_masks = load_pickle(IMAGES_MASKS_FILENAME)
+    logging.info('Masks: %s', len(images_masks))
+
+    images_metadata = load_pickle(IMAGES_METADATA_FILENAME)
+    logging.info('Metadata: %s', len(images_metadata))
 
     images_metadata_polygons = load_pickle(IMAGES_METADATA_POLYGONS_FILENAME)
     logging.info('Polygons metadata: %s', len(images_metadata_polygons))
+
+    mean_m, std_m, mean_sharpened, std_sharpened = load_pickle(IMAGES_MEANS_STDS_FILENAME)
+    logging.info('Mean & Std: %s - %s, %s - %s', mean_m.shape, std_m.shape, mean_sharpened.shape, std_sharpened.shape)
+
 
     images_all = list(images_metadata.keys())
     images_train = list(images_metadata_polygons.keys())
@@ -57,20 +63,20 @@ def main(kind):
             for img_id in target_images
             }
 
-    jaccards_reconstructed = []
     jaccards = []
+    model_name = 'combined_model_jaccard_softmax_without_small'
     for img_idx, img_id in enumerate(target_images):
-        # if img_id != '6110_1_2':
-        #     continue
+        if img_id != '6040_4_4':
+            continue
 
-        mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, img_id + '.npy')
+        mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, '{0}_{1}.npy'.format(img_id, model_name))
         if not os.path.isfile(mask_filename):
             logging.warning('Cannot find masks for image: %s', img_id)
             continue
 
         img_data = None
         if kind == 'train':
-            img_data = images_data[img_id] * channels_std + channels_mean
+            img_data = images_data_sharpened[img_id] * std_sharpened + mean_sharpened
         if kind == 'test':
             img_filename = os.path.join(IMAGES_NORMALIZED_DATA_DIR, img_id + '.npy')
             img_data = np.load(img_filename)
@@ -85,28 +91,29 @@ def main(kind):
             img_poly_true = None
             img_mask_true = None
 
+        # plot_image(img_data)
+
+        img_mask_pred_simplified = simplify_mask(img_mask_pred, kernel_size=5)
+
+        # if kind == 'train':
+        #     for i, class_name in enumerate(CLASSES_NAMES):
+        #         if img_mask_true[:,:,i].sum() > 0:
+        #             plot_two_masks(img_mask_true[:,:,i], img_mask_pred[:,:,i],
+        #                 titles=['Ground Truth - {}'.format(class_name), 'Prediction - {}'.format(class_name)])
+        #             # plot_two_masks(img_mask_pred[:,:,i], img_mask_pred_simplified[:,:,i],
+        #             #     titles=['Ground Truth - {}'.format(class_name), 'Prediction - {}'.format(class_name)])
+
         img_poly_pred = create_image_polygons(img_mask_pred, img_metadata, scale=False)
-        # plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true, title=img_id, show=False)
+        plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true, title=img_id, show=False)
 
         if kind == 'train':
             # convert predicted polygons to mask
-            img_mask_reconstructed = []
-            for class_type in sorted(img_poly_pred.keys()):
-                ploy_metadata = {'ploy_scaled': img_poly_pred[class_type].wkt}
-                img_class_mask_reconstructed = create_mask_from_metadata(img_metadata, ploy_metadata)
-                img_mask_reconstructed.append(img_class_mask_reconstructed)
-            img_mask_reconstructed = np.stack(img_mask_reconstructed, axis=-1)
-
-
             jaccard = jaccard_coef(img_mask_pred, img_mask_true)
-            jaccard_reconstructed = jaccard_coef(img_mask_reconstructed, img_mask_true)
             jaccards.append(jaccard)
-            jaccards_reconstructed.append(jaccard_reconstructed)
-            logging.info('Image: %s, jaccard: %s, jaccard reconstructed: %s', img_id, jaccard, jaccard_reconstructed)
-
+            logging.info('Image: %s, jaccard: %s', img_id, jaccard)
 
     if kind == 'train':
-        logging.info('Mean jaccard: %s, Mean jaccard reconstructed: %s', np.mean(jaccards), np.mean(jaccards_reconstructed))
+        logging.info('Mean jaccard: %s', np.mean(jaccards))
 
     import matplotlib.pyplot as plt
     plt.show()

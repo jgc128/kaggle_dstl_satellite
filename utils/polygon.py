@@ -108,7 +108,7 @@ def mask_to_polygons_v2(mask, min_area=1.0):
     if not all_polygons.is_valid:
         all_polygons = all_polygons.buffer(0)
 
-    all_polygons = all_polygons.simplify(tolerance=0.1, preserve_topology=False)
+    all_polygons = all_polygons.simplify(tolerance=0.5, preserve_topology=False)
 
     if all_polygons.type == 'Polygon':
         all_polygons = shapely.geometry.MultiPolygon([all_polygons])
@@ -117,8 +117,8 @@ def mask_to_polygons_v2(mask, min_area=1.0):
 
 
 def create_polygons_from_mask(mask, image_metadata, scale=True):
-    poly = mask_to_polygons(mask, min_area=1.0)
-    # poly = mask_to_polygons_v2(mask)
+    # poly = mask_to_polygons(mask, min_area=1.0)
+    poly = mask_to_polygons_v2(mask, min_area=20)
 
     if scale:
         x_scaler = image_metadata['x_rgb_scaler']
@@ -203,8 +203,8 @@ def sample_patches(images, data, patch_sizes, nb_samples, kind='train', val_size
 
 
 def split_image_to_patches(data, patch_sizes, overlap=0.5):
-    img_height = data[0].shape[0] - 4 # just in case
-    img_width = data[0].shape[1] - 4 # just in case
+    img_height = data[0].shape[0] - 4  # just in case
+    img_width = data[0].shape[1] - 4  # just in case
     patch_size = patch_sizes[0]
 
     step_size = (int(patch_size[0] * overlap), int(patch_size[1] * overlap))
@@ -304,3 +304,20 @@ def jaccard_coef(y_pred, y_true, mean=True):
         jaccard = np.mean(jaccard)
 
     return jaccard
+
+
+def simplify_mask(mask, kernel_size=5):
+    nb_classes = mask.shape[2]
+
+    mask_simplified = []
+    for i in range(nb_classes):
+        msk = mask[:, :, i]
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        msk_handled = cv2.morphologyEx(msk, cv2.MORPH_OPEN, kernel)
+
+        mask_simplified.append(msk_handled)
+
+    mask_simplified = np.stack(mask_simplified, axis=-1)
+
+    return mask_simplified

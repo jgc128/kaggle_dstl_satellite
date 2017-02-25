@@ -57,13 +57,13 @@ def plot_mask(mask_data, figure=None, subplot=111, title=None):
 def plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true=None, title=None, show=True):
     import matplotlib.pyplot as plt
 
-    img_data_scaled = bytescale(img_data, low=0, high=255, cmin=0, cmax=2047)
+    img_data_scaled = bytescale(img_data, low=0, high=255, cmin = 0, cmax = 2047)
 
     if isinstance(img_poly_pred[list(img_poly_pred.keys())[0]], str):
         img_poly_pred = {i: shapely.wkt.loads(p) for i, p in img_poly_pred.items()}
 
     if img_poly_true is not None:
-        img_poly_true = {i: shapely.wkt.loads(p['ploy_scaled']) for i, p in img_poly_true.items()}
+        img_poly_true = {i: shapely.wkt.loads(p['ploy_rgb_scaled']) for i, p in img_poly_true.items()}
 
     nb_cols = 2 if img_poly_true is not None else 1
     figsize = (14, 7) if img_poly_true is not None else (7, 7)
@@ -80,8 +80,8 @@ def plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true=None, tit
     plt_patches_pred = create_matplotlib_patches_from_polygons(img_poly_pred)
     ax_pred.add_collection(plt_patches_pred)
 
-    ax_pred.set_xlim(0, img_metadata['width'])
-    ax_pred.set_ylim(0, img_metadata['height'])
+    ax_pred.set_xlim(0, img_metadata['width_rgb'])
+    ax_pred.set_ylim(0, img_metadata['height_rgb'])
     ax_pred.set_axis_off()
 
     if img_poly_true is not None:
@@ -93,8 +93,8 @@ def plot_polygons(img_data, img_metadata, img_poly_pred, img_poly_true=None, tit
         ax_true.add_collection(plt_patches_true)
 
         # set attributes
-        ax_true.set_xlim(0, img_metadata['width'])
-        ax_true.set_ylim(0, img_metadata['height'])
+        ax_true.set_xlim(0, img_metadata['width_rgb'])
+        ax_true.set_ylim(0, img_metadata['height_rgb'])
         ax_true.set_axis_off()
 
     titles = ['Ground Truth', 'Predicted', ] if img_poly_true is not None else ['Predicted', ]
@@ -132,10 +132,10 @@ def create_matplotlib_patches_from_polygons(img_poly):
             plt_polygons.append(plt_poly)
             plt_colors.append(class_colormap[class_type - 1])
 
-            # for poly in interiors:
-            #     plt_poly = patches.Polygon(poly, closed=True)
-            #     plt_polygons.append(plt_poly)
-            #     plt_colors.append('red')
+            for poly in interiors:
+                plt_poly = patches.Polygon(poly, closed=True)
+                plt_polygons.append(plt_poly)
+                plt_colors.append('red')
             #
             # break
 

@@ -272,7 +272,7 @@ def main(model_name):
     logging.info('Channels: %s, %s', nb_channels_m, nb_channels_sharpened)
 
     # skip vehicles and misc manmade structures
-    classes_to_skip = {2, 9, 10}
+    classes_to_skip = {1, 3, 4, 5, 6, 7, 8}  # {2, 9, 10}
     needed_classes = [c for c in range(nb_classes) if c + 1 not in classes_to_skip]
     needed_classes_names = [c for i, c in enumerate(classes_names) if i + 1 not in classes_to_skip]
     logging.info('Skipping classes: %s', classes_to_skip)
@@ -282,7 +282,7 @@ def main(model_name):
     needed_m_bands = [i for i in range(nb_channels_m) if i not in m_bands_to_skip]
     logging.info('Skipping M bands: %s', m_bands_to_skip)
 
-    patch_size = (224, 224,)
+    patch_size = (64, 64,)  # (224, 224,)
     patch_size_sharpened = (patch_size[0], patch_size[1],)
     patch_size_m = (patch_size_sharpened[0] // 4, patch_size_sharpened[1] // 4,)
     logging.info('Patch sizes: %s, %s, %s', patch_size, patch_size_sharpened, patch_size_m)
@@ -409,7 +409,7 @@ def predict(kind, model_name, global_step):
     needed_m_bands = [i for i in range(nb_channels_m) if i not in m_bands_to_skip]
     logging.info('Skipping M bands: %s', m_bands_to_skip)
 
-    patch_size = (224, 224,)
+    patch_size = (64, 64,)  # (224, 224,)
     patch_size_sharpened = (patch_size[0], patch_size[1],)
     patch_size_m = (patch_size_sharpened[0] // 4, patch_size_sharpened[1] // 4,)
     logging.info('Patch sizes: %s, %s, %s', patch_size, patch_size_sharpened, patch_size_m)
@@ -433,7 +433,6 @@ def predict(kind, model_name, global_step):
 
     nb_target_images = len(target_images)
     logging.info('Target images: %s - %s', kind, nb_target_images)
-
 
     batch_size = 25
 
@@ -485,12 +484,12 @@ def predict(kind, model_name, global_step):
         masks_without_excluded = convert_softmax_to_masks(classes_probs)
 
         # join masks and put zeros insted of excluded classes
-        zeros_filler = np.zeros_like(masks_without_excluded[:,:,0])
+        zeros_filler = np.zeros_like(masks_without_excluded[:, :, 0])
         masks_all = []
         j = 0
         for i in range(nb_classes):
             if i + 1 not in classes_to_skip:
-                masks_all.append(masks_without_excluded[:,:,j])
+                masks_all.append(masks_without_excluded[:, :, j])
                 j += 1
             else:
                 masks_all.append(zeros_filler)
@@ -506,7 +505,7 @@ def predict(kind, model_name, global_step):
 
 if __name__ == '__main__':
     task = 'main'
-    model_name = 'combined_model_jaccard_softmax_without_small'  # 'resnet' 'simple_model_jaccard_sigmoid'
+    model_name = 'combined_model_jaccard_softmax_only_small'  # 'resnet' 'simple_model_jaccard_sigmoid'
     global_step = 41310
     kind = 'test'
 
