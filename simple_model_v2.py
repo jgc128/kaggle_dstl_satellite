@@ -151,17 +151,17 @@ def debug_run():
 
     nb_iterations = 100000
     nb_samples_train = 10
-    nb_samples_val = 10
+    nb_samples_val = 5
     batch_size = 5
 
 @ex.capture
-def evaluate_model_jaccard(model, images, images_masks_stacked, images_data, needed_classes, kind,
-                           nb_samples_val, batch_size):
+def evaluate_model_jaccard(model, images, images_masks_stacked, images_data, needed_classes, kind, batch_size):
 
     data_dict = sample_data_dict(images, images_masks_stacked, images_data, kind)
+    nb_samples = len(data_dict['X'])
 
     Y_pred_probs = model.predict(data_dict, batch_size=batch_size)
-    Y_pred = np.stack([convert_softmax_to_masks(Y_pred_probs[i]) for i in range(nb_samples_val)], axis=0)
+    Y_pred = np.stack([convert_softmax_to_masks(Y_pred_probs[i]) for i in range(nb_samples)], axis=0)
 
     Y = data_dict['Y']
     Y = Y[:, :, :, needed_classes]
@@ -172,9 +172,17 @@ def evaluate_model_jaccard(model, images, images_masks_stacked, images_data, nee
 
 @ex.capture
 def sample_data_dict(images, images_masks_stacked, images_data, kind,
-                     patch_size, nb_samples_train, val_size, classes_to_skip):
+                     patch_size, nb_samples_train, nb_samples_val, val_size, classes_to_skip):
+
+    if kind == 'val':
+        nb_samples = nb_samples_val
+    elif kind == 'train':
+        nb_samples = nb_samples_train
+    else:
+        raise AttributeError('Kind {} is not supported'.format(kind))
+
     patches = sample_patches(images, [images_masks_stacked, images_data], [patch_size, patch_size],
-                             nb_samples_train, kind=kind, val_size=val_size)
+                             nb_samples, kind=kind, val_size=val_size)
 
     Y, X = patches[0], patches[1]
     Y_softmax = convert_masks_to_softmax(Y, classes_to_skip=classes_to_skip)
