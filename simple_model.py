@@ -11,13 +11,13 @@ from random import shuffle
 
 from tensorflow_helpers.models.base_model import BaseModel
 
-from utils.data import load_pickle, convert_masks_to_softmax, convert_softmax_to_masks
+from utils.data import load_pickle, convert_masks_to_softmax, convert_softmax_to_masks, get_train_test_images_ids
 from utils.matplotlib import matplotlib_setup
 from config import IMAGES_MASKS_FILENAME, TENSORBOARD_DIR, MODELS_DIR, \
     IMAGES_METADATA_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
     IMAGES_NORMALIZED_DATA_DIR, IMAGES_PREDICTION_MASK_DIR, CLASSES_NAMES, IMAGES_NORMALIZED_M_FILENAME, \
     IMAGES_NORMALIZED_SHARPENED_FILENAME, IMAGES_MEANS_STDS_FILENAME
-from utils.polygon import split_image_to_patches, join_mask_patches, sample_patches, jaccard_coef
+from utils.polygon import split_image_to_patches, join_mask_patches, sample_patches, jaccard_coef, stack_masks
 import utils.tf as tf_utils
 
 
@@ -262,10 +262,8 @@ def main(model_name):
     nb_images = len(images)
     logging.info('Train images: %s', nb_images)
 
-    images_masks_stacked = {
-        img_id: np.stack([images_masks[img_id][target_class] for target_class in classes], axis=-1)
-        for img_id in images
-        }
+    images_masks_stacked = stack_masks(images, images_masks, classes)
+    logging.info('Masks stacked: %s', len(images_masks_stacked))
 
     nb_channels_m = images_data_m[images[0]].shape[2]
     nb_channels_sharpened = images_data_sharpened[images[0]].shape[2]
@@ -420,9 +418,7 @@ def predict(kind, model_name, global_step):
     images_metadata_polygons = load_pickle(IMAGES_METADATA_POLYGONS_FILENAME)
     logging.info('Polygons metadata: %s', len(images_metadata_polygons))
 
-    images_all = list(images_metadata.keys())
-    images_train = list(images_metadata_polygons.keys())
-    images_test = sorted(set(images_all) - set(images_train))
+    images_all, images_train, images_test = get_train_test_images_ids()
 
     if kind == 'test':
         target_images = images_test

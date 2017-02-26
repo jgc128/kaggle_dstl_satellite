@@ -13,6 +13,7 @@ from utils.data import load_grid_sizes, load_polygons, load_images, save_pickle,
 from utils.matplotlib import matplotlib_setup, plot_image, plot_mask
 from config import IMAGES_METADATA_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, TRAIN_PATCHES_COORDINATES_FILENAME
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_MASKS_FILENAME
+from utils.polygon import stack_masks
 
 
 def sample_patch(img_id, mask_data, patch_size, threshold=0.1, nb_masks=64, nb_tries=99):
@@ -70,10 +71,8 @@ def main():
     images = np.array(list(images_data.keys()))
     classes = np.arange(1, nb_classes + 1)
 
-    images_masks_stacked = {
-        img_id: np.stack([images_masks[img_id][target_class] for target_class in classes], axis=-1)
-        for img_id in images
-        }
+    images_masks_stacked = stack_masks(images, images_masks, classes)
+    logging.info('Masks stacked: %s', len(images_masks_stacked))
 
     train_patches_coordinates = []
     while len(train_patches_coordinates) < nb_patches:

@@ -4,8 +4,9 @@ import numpy as np
 
 from config import IMAGES_NORMALIZED_FILENAME, IMAGES_METADATA_FILENAME, IMAGES_METADATA_POLYGONS_FILENAME, \
     IMAGES_MASKS_FILENAME
-from utils.data import load_pickle, convert_masks_to_softmax, convert_softmax_to_masks
+from utils.data import load_pickle, convert_masks_to_softmax, convert_softmax_to_masks, get_train_test_images_ids
 from utils.matplotlib import matplotlib_setup, plot_image, plot_mask, plot_two_masks
+from utils.polygon import stack_masks
 
 
 def main():
@@ -20,25 +21,14 @@ def main():
     images_masks = load_pickle(IMAGES_MASKS_FILENAME)
     logging.info('Images: %s, masks: %s', len(images_data), len(images_masks))
 
-    # load images metadata
-    images_metadata, channels_mean, channels_std = load_pickle(IMAGES_METADATA_FILENAME)
-    logging.info('Images metadata: %s, mean: %s, std: %s', len(images_metadata), channels_mean.shape,
-                 channels_std.shape)
-
-    images_metadata_polygons = load_pickle(IMAGES_METADATA_POLYGONS_FILENAME)
-    logging.info('Polygons metadata: %s', len(images_metadata_polygons))
-
-    images_all = list(images_metadata.keys())
-    images_train = list(images_metadata_polygons.keys())
-    images_test = sorted(set(images_all) - set(images_train))
+    images_all, images_train, images_test = get_train_test_images_ids()
     logging.info('Train: %s, test: %s, all: %s', len(images_train), len(images_test), len(images_all))
 
     nb_classes = len(images_masks[images_train[0]])
     classes = np.arange(1, nb_classes + 1)
-    images_masks_stacked = {
-        img_id: np.stack([images_masks[img_id][target_class] for target_class in classes], axis=-1)
-        for img_id in images_train
-        }
+
+    images_masks_stacked = stack_masks(images_train, images_masks, classes)
+    logging.info('Masks stacked: %s', len(images_masks_stacked))
 
     # # plot_image(images_data[test_img_id] * channels_std + channels_mean)
     # for img_id in images_train:

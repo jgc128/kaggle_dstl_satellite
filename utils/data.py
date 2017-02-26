@@ -11,7 +11,7 @@ import tifffile as tiff
 import skimage.transform
 import skimage.color
 
-from config import DEBUG, DEBUG_IMAGE
+from config import DEBUG, DEBUG_IMAGE, GRID_SIZES_FILENAME, POLYGONS_FILENAME
 
 
 def load_pickle(filename):
@@ -207,22 +207,35 @@ def pansharpen(m, pan, method='browley', W=0.1, all_data=False):
     rgbn[:, :, 2] = m[:, :, 1]  # blue
     rgbn[:, :, 3] = m[:, :, 6]  # NIR-1
 
+    rest_m = np.empty((m.shape[0], m.shape[1], 4))
+    rest_m[:, :, 0] = m[:, :, 0]  # Coastal
+    rest_m[:, :, 1] = m[:, :, 3]  # Yellow
+    rest_m[:, :, 2] = m[:, :, 5]  # Red Edge
+    rest_m[:, :, 3] = m[:, :, 7]  # NIR-2
+
     # scaled them
     rgbn_scaled = np.empty((m.shape[0] * 4, m.shape[1] * 4, 4))
+    rest_m_scaled = np.empty((m.shape[0] * 4, m.shape[1] * 4, 4))
 
     for i in range(4):
         img = rgbn[:, :, i]
         scaled = skimage.transform.rescale(img, (4, 4))
         rgbn_scaled[:, :, i] = scaled
 
+        img_rest = rest_m[:,:, i]
+        scaled_rest = skimage.transform.rescale(img_rest, (4, 4))
+        rest_m_scaled[:,:, i] = scaled_rest
+
     # check size and crop for pan band
     if pan.shape[0] < rgbn_scaled.shape[0]:
         rgbn_scaled = rgbn_scaled[:pan.shape[0], :, :]
+        rest_m_scaled = rest_m_scaled[:pan.shape[0], :, :]
     else:
         pan = pan[:rgbn_scaled.shape[0], :]
 
     if pan.shape[1] < rgbn_scaled.shape[1]:
         rgbn_scaled = rgbn_scaled[:, :pan.shape[1], :]
+        rest_m_scaled = rest_m_scaled[:, :pan.shape[1], :]
     else:
         pan = pan[:, :rgbn_scaled.shape[1]]
 
@@ -274,7 +287,23 @@ def pansharpen(m, pan, method='browley', W=0.1, all_data=False):
         hsv[:, :, 2] = pan - I * W
         image = skimage.color.hsv2rgb(hsv)
 
+    # scale the rest by using the simple_browley method
+    all_in_rest = np.sum(rest_m_scaled, axis=-1)
+    prod = pan / all_in_rest
+    image_rest = rest_m_scaled * np.expand_dims(prod, -1)
+
     if all_data:
-        return rgbn_scaled, image, I
+        return rgbn_scaled, image, I, image_rest
     else:
-        return image
+        return image, image_rest
+
+
+def get_train_test_images_ids():
+    grid_sizes = load_grid_sizes(GRID_SIZES_FILENAME)
+    polygons = load_polygons(POLYGONS_FILENAME)
+
+    all_images = sorted(set(grid_sizes.index))
+    train_images = sorted(set(polygons.index))
+    test_images = sorted(set(all_images) - set(train_images))
+
+    return all_images, train_images, test_images

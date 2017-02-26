@@ -1,12 +1,14 @@
 import logging
 
+import gc
 import numpy as np
 
 import shapely
 import shapely.wkt
 import shapely.affinity
 
-from utils.data import load_grid_sizes, load_polygons, load_images, save_pickle, get_images_sizes, pansharpen
+from utils.data import load_grid_sizes, load_polygons, load_images, save_pickle, get_images_sizes, pansharpen, \
+    get_train_test_images_ids
 from utils.matplotlib import matplotlib_setup
 from utils.polygon import create_mask_from_polygons
 from config import GRID_SIZES_FILENAME, POLYGONS_FILENAME, IMAGES_THREE_BAND_DIR, IMAGES_SIXTEEN_BAND_DIR, \
@@ -103,7 +105,7 @@ def create_images_metadata(grid_sizes, polygons, images_sizes_rgb, images_sizes_
 def create_classes_masks(images_metadata, images_metadata_polygons):
     masks = {}
 
-    for img_id, img_polygons in images_metadata_polygons.items():
+    for i, (img_id, img_polygons) in enumerate(images_metadata_polygons.items()):
         masks[img_id] = {}
 
         for class_type, polygon_metadata in img_polygons.items():
@@ -115,10 +117,14 @@ def create_classes_masks(images_metadata, images_metadata_polygons):
 
             masks[img_id][class_type] = mask
 
+        if (i + 1) % 10 == 0:
+            logging.info('Masked: %s/%s [%.2f]',
+                         (i + 1), len(images_metadata_polygons), 100 * (i + 1) / len(images_metadata_polygons))
+
     return masks
 
 
-def normalize_images(images_data):
+def calculate_mean_std(images_data):
     nb_channels = images_data[list(images_data.keys())[0]].shape[2]
 
     channel_data = [[] for _ in range(nb_channels)]
@@ -132,23 +138,45 @@ def normalize_images(images_data):
     channels_mean = channel_data.mean(axis=1).astype(np.float32)
     channels_std = channel_data.std(axis=1).astype(np.float32)
 
+    return channels_mean, channels_std
+
+
+def calculate_channel_mean_std(images_data, channel):
+    channel_data = []
+    for img_id, img_data in images_data.items():
+        img_channel_data = img_data[:, :, channel].flatten()
+        channel_data.append(img_channel_data)
+
+    channel_data = np.concatenate(channel_data, axis=0)
+
+    channel_mean = channel_data.mean().astype(np.float32)
+    channel_std = channel_data.std().astype(np.float32)
+
+    return channel_mean, channel_std
+
+
+def normalize_images(images_data, channels_mean, channels_std):
     images_data_normalized = {}
+
     for img_id, img_data in images_data.items():
         images_data_normalized[img_id] = ((img_data - channels_mean) / channels_std).astype(np.float32)
 
-    return images_data_normalized, channels_mean, channels_std
+    return images_data_normalized
 
 
 def pansharpen_images(images_data_m, images_data_p, method='browley', W=0.3):
     images = sorted(images_data_m.keys())
 
     images_data_sharpened = {}
-    for img_id in images:
+    for i, img_id in enumerate(images):
         img_m = images_data_m[img_id]
         img_pan = images_data_p[img_id]
-        img_rgbn_sharpened = pansharpen(img_m, img_pan, method=method, W=W)
+        img_rgbn_sharpened, img_rest_sharpened = pansharpen(img_m, img_pan, method=method, W=W)
 
-        images_data_sharpened[img_id] = img_rgbn_sharpened
+        images_data_sharpened[img_id] = np.concatenate([img_rgbn_sharpened, img_rest_sharpened], axis=-1)
+
+        if (i + 1) % 10 == 0:
+            logging.info('Pansharpened: %s/%s [%.2f]', (i + 1), len(images), 100 * (i + 1) / len(images))
 
     return images_data_sharpened
 
@@ -163,43 +191,55 @@ def main():
     grid_sizes = load_grid_sizes(GRID_SIZES_FILENAME)
     polygons = load_polygons(POLYGONS_FILENAME)
 
-    all_images = sorted(set(grid_sizes.index))
-    train_images = sorted(set(polygons.index))
-    test_images = sorted(set(all_images) - set(train_images))
-    logging.info('Train: %s, Test: %s, All: %s', len(train_images), len(test_images), len(all_images))
+    images_all, images_train, images_test = get_train_test_images_ids()
+    logging.info('Train: %s, Test: %s, All: %s', len(images_train), len(images_test), len(images_all))
 
     # create images metadata
-    images_sizes_rgb = get_images_sizes(IMAGES_THREE_BAND_DIR, target_images=all_images)
-    images_sizes_m = get_images_sizes(IMAGES_SIXTEEN_BAND_DIR, target_images=all_images, target_format='M')
-    images_sizes_p = get_images_sizes(IMAGES_SIXTEEN_BAND_DIR, target_images=all_images, target_format='P')
+    images_sizes_rgb = get_images_sizes(IMAGES_THREE_BAND_DIR, target_images=images_all)
+    images_sizes_m = get_images_sizes(IMAGES_SIXTEEN_BAND_DIR, target_images=images_all, target_format='M')
+    images_sizes_p = get_images_sizes(IMAGES_SIXTEEN_BAND_DIR, target_images=images_all, target_format='P')
     images_metadata, images_metadata_polygons = create_images_metadata(
         grid_sizes, polygons, images_sizes_rgb, images_sizes_m, images_sizes_p)
     logging.info('Metadata: %s, polygons metadata: %s', len(images_metadata), len(images_metadata_polygons))
 
     # load train images
-    images_data_m = load_images(IMAGES_SIXTEEN_BAND_DIR, target_images=train_images, target_format='M')
-    images_data_p = load_images(IMAGES_SIXTEEN_BAND_DIR, target_images=train_images, target_format='P')
+    images_data_m = load_images(IMAGES_SIXTEEN_BAND_DIR, target_images=images_train, target_format='M')
+    images_data_p = load_images(IMAGES_SIXTEEN_BAND_DIR, target_images=images_train, target_format='P')
 
-    # pansharpen to get (R,G,B,NIR) scaled images
+    # pansharpen to get (R,G,B,NIR) + (rest,) scaled images
     images_data_sharpened = pansharpen_images(images_data_m, images_data_p)
     logging.info('Images sharpened: %s', len(images_data_sharpened))
 
     # create masks using RGB sizes
     images_masks = create_classes_masks(images_metadata, images_metadata_polygons)
+    logging.info('Masks created: %s', len(images_masks))
 
-    # normalize all the data
-    images_data_m_normalized, mean_m, std_m = normalize_images(images_data_m)
-    images_data_sharpened_normalized, mean_sharpened, std_sharpened = normalize_images(images_data_sharpened)
+    # free the memory
+    del images_data_m
+    del images_data_p
 
-    # save everything
+    # normalize the data channel by channel
+    nb_channels_sharpened = images_data_sharpened[images_train[0]].shape[2]
+    channels_means_stds_sharpened = []
+    for i in range(nb_channels_sharpened):
+        ch_mean_std = calculate_channel_mean_std(images_data_sharpened, i)
+        channels_means_stds_sharpened.append(ch_mean_std)
+
+        logging.info('Channel normalized: %s', i)
+
+    channels_means_stds_sharpened = np.array(channels_means_stds_sharpened)
+    mean_sharpened = channels_means_stds_sharpened[:, 0]
+    std_sharpened = channels_means_stds_sharpened[:, 1]
+
+    images_data_sharpened_normalized = normalize_images(images_data_sharpened, mean_sharpened, std_sharpened)
+
     save_pickle(IMAGES_METADATA_FILENAME, images_metadata)
     save_pickle(IMAGES_METADATA_POLYGONS_FILENAME, images_metadata_polygons)
-
     save_pickle(IMAGES_MASKS_FILENAME, images_masks)
-    save_pickle(IMAGES_NORMALIZED_M_FILENAME, images_data_m_normalized)
+
     save_pickle(IMAGES_NORMALIZED_SHARPENED_FILENAME, images_data_sharpened_normalized)
 
-    save_pickle(IMAGES_MEANS_STDS_FILENAME, [mean_m, std_m, mean_sharpened, std_sharpened])
+    save_pickle(IMAGES_MEANS_STDS_FILENAME, [mean_sharpened, std_sharpened])
 
 
 if __name__ == '__main__':

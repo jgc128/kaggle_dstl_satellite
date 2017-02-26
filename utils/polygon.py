@@ -321,3 +321,13 @@ def simplify_mask(mask, kernel_size=5):
     mask_simplified = np.stack(mask_simplified, axis=-1)
 
     return mask_simplified
+
+def stack_masks(images, images_masks, classes):
+    images_masks_stacked = {
+        img_id: np.stack([images_masks[img_id][target_class] for target_class in classes], axis=-1)
+        for img_id in images
+        }
+
+    return images_masks_stacked
+
+

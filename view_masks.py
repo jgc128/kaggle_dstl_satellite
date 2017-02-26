@@ -9,9 +9,9 @@ from config import IMAGES_METADATA_FILENAME, IMAGES_PREDICTION_MASK_DIR, \
     IMAGES_NORMALIZED_SHARPENED_FILENAME, IMAGES_MEANS_STDS_FILENAME, CLASSES_NAMES
 from config import IMAGES_METADATA_POLYGONS_FILENAME
 from create_submission import create_image_polygons
-from utils.data import load_pickle
+from utils.data import load_pickle, get_train_test_images_ids
 from utils.matplotlib import matplotlib_setup, plot_image, plot_polygons, plot_two_masks
-from utils.polygon import jaccard_coef, create_mask_from_polygons, simplify_mask
+from utils.polygon import jaccard_coef, create_mask_from_polygons, simplify_mask, stack_masks
 
 
 def main(kind):
@@ -37,10 +37,7 @@ def main(kind):
     mean_m, std_m, mean_sharpened, std_sharpened = load_pickle(IMAGES_MEANS_STDS_FILENAME)
     logging.info('Mean & Std: %s - %s, %s - %s', mean_m.shape, std_m.shape, mean_sharpened.shape, std_sharpened.shape)
 
-
-    images_all = list(images_metadata.keys())
-    images_train = list(images_metadata_polygons.keys())
-    images_test = sorted(set(images_all) - set(images_train))
+    images_all, images_train, images_test = get_train_test_images_ids()
     logging.info('Train: %s, test: %s, all: %s', len(images_train), len(images_test), len(images_all))
 
     if kind == 'test':
@@ -58,10 +55,8 @@ def main(kind):
 
     images_masks_stacked = None
     if kind == 'train':
-        images_masks_stacked = {
-            img_id: np.stack([images_masks[img_id][target_class] for target_class in classes], axis=-1)
-            for img_id in target_images
-            }
+        images_masks_stacked = stack_masks(target_images, images_masks, classes)
+        logging.info('Masks stacked: %s', len(images_masks_stacked))
 
     jaccards = []
     model_name = 'combined_model_jaccard_softmax_without_small'
