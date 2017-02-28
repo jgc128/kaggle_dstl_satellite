@@ -62,7 +62,8 @@ def _get_images_filenames(directory, target_images, target_format=None):
     else:
         filename_format = '{0}_{1}.tif'
 
-    images_filenames = [os.path.join(directory, filename_format.format(img_id, target_format)) for img_id in target_images]
+    images_filenames = [os.path.join(directory, filename_format.format(img_id, target_format)) for img_id in
+                        target_images]
 
     return images_filenames, target_images
 
@@ -79,6 +80,7 @@ def load_image(img_filename):
 
     return img_data
 
+
 def load_images(directory, target_images=None, target_format=None):
     images_filenames, target_images = _get_images_filenames(directory, target_images, target_format)
 
@@ -92,7 +94,6 @@ def load_images(directory, target_images=None, target_format=None):
 
     logging.info('Images data: %s - %s', target_format or '*', len(images_data))
     return images_data
-
 
 
 def get_images_sizes(directory, target_images=None, target_format=None):
@@ -118,11 +119,8 @@ def load_sample_submission(filename):
     return data
 
 
-def convert_masks_to_softmax(Y, classes_to_skip=None):
+def convert_masks_to_softmax(Y, needed_classes=None):
     batch_size, img_height, img_width, nb_classes = Y.shape
-
-    if classes_to_skip is None:
-        classes_to_skip = set()
 
     # Classes:
     # 1 - Buildings
@@ -148,17 +146,17 @@ def convert_masks_to_softmax(Y, classes_to_skip=None):
         9: 10,
         10: 10,
     }
-    classes_mul = [classes_mul[c+1] for c in range(nb_classes)]
+    classes_mul = [classes_mul[c + 1] for c in range(nb_classes)]
 
     Y_prior = Y * classes_mul
     Y_prior *= 2
 
     # select only needed classes
-    needed_classes = [c for c in range(nb_classes) if c + 1 not in classes_to_skip]
-    Y_prior_filtered = Y_prior[:,:,:,needed_classes]
+    if needed_classes is not None:
+        Y_prior = Y_prior[:, :, :, needed_classes]
 
     no_class = np.full((batch_size, img_height, img_width), 1, dtype=np.uint8)
-    Y_no_class = np.insert(Y_prior_filtered, 0, no_class, axis=3)
+    Y_no_class = np.insert(Y_prior, 0, no_class, axis=3)
     Y_softmax = Y_no_class.argmax(axis=-1)
 
     return Y_softmax
@@ -222,9 +220,9 @@ def pansharpen(m, pan, method='browley', W=0.1, all_data=False):
         scaled = skimage.transform.rescale(img, (4, 4))
         rgbn_scaled[:, :, i] = scaled
 
-        img_rest = rest_m[:,:, i]
+        img_rest = rest_m[:, :, i]
         scaled_rest = skimage.transform.rescale(img_rest, (4, 4))
-        rest_m_scaled[:,:, i] = scaled_rest
+        rest_m_scaled[:, :, i] = scaled_rest
 
     # check size and crop for pan band
     if pan.shape[0] < rgbn_scaled.shape[0]:

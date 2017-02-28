@@ -96,9 +96,9 @@ def main(model_name):
             img_mask = None
 
         if not double_pass:
-            img_mask_simplified = simplify_mask(img_mask, kernel_size=5)
-            img_polygons = create_image_polygons(img_mask_simplified, img_metadata, scale=True,
-                                                 skip_classes=skip_classes)
+            # img_mask_simplified = simplify_mask(img_mask, kernel_size=5)
+            img_polygons = create_image_polygons(img_mask, img_metadata,
+                                                 scale=True, skip_classes=skip_classes)
         else:
             # img_polygons = create_image_polygons(img_mask, img_metadata, scale=False, skip_classes=skip_classes)
             #
@@ -115,13 +115,13 @@ def main(model_name):
         polygons[img_id] = img_polygons
 
         if (i + 1) % 10 == 0:
-            logging.info('Processed images: %s/%s [%.2f%%]', i + 1, len(target_images),
-                         100 * (i + 1) / len(target_images))
+            logging.info('Processed images: %s/%s [%.2f%%]',
+                         i + 1, len(target_images), 100 * (i + 1) / len(target_images))
 
     submission_filename = os.path.join(SUBMISSION_DIR, 'submission_{}.csv'.format(model_name))
     save_submission(polygons, submission_order, submission_filename, skip_classes=skip_classes)
 
 
 if __name__ == '__main__':
-    model_name = 'combined_model_jaccard_softmax_without_small'
+    model_name = 'softmax_pansharpen'
     main(model_name)

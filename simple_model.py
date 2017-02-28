@@ -321,7 +321,7 @@ def main(model_name):
                                      nb_samples_train, kind='train', val_size=val_size)
 
             Y, X_sharpened, X_m = patches[0], patches[1], patches[2]
-            Y_softmax = convert_masks_to_softmax(Y, classes_to_skip=classes_to_skip)
+            Y_softmax = convert_masks_to_softmax(Y, needed_classes=needed_classes)
             X_m = X_m[:, :, :, needed_m_bands]
 
             data_dict_train = {'X_sharpened': X_sharpened, 'X_m': X_m, 'Y': Y_softmax}

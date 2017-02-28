@@ -1,6 +1,7 @@
 from collections import defaultdict
 
 import cv2
+import logging
 import shapely
 import shapely.wkt
 import shapely.affinity
@@ -117,8 +118,8 @@ def mask_to_polygons_v2(mask, min_area=1.0):
 
 
 def create_polygons_from_mask(mask, image_metadata, scale=True):
-    # poly = mask_to_polygons(mask, min_area=1.0)
-    poly = mask_to_polygons_v2(mask, min_area=20)
+    poly = mask_to_polygons(mask, min_area=1.0, epsilon=1)
+    # poly = mask_to_polygons_v2(mask, min_area=20)
 
     if scale:
         x_scaler = image_metadata['x_rgb_scaler']
@@ -160,7 +161,7 @@ def sample_random_corner(img_height, img_width, patch_size, kind, val_size):
     return img_c1
 
 
-def get_scaled_patches(base_c1, patch_sizes):
+def get_scaled_patches_coordinates(base_c1, patch_sizes):
     scales = [(patch_sizes[0][0] / p[0], patch_sizes[0][1] / p[1],) for p in patch_sizes]
 
     img_c1 = [(int(base_c1[0] / scales[i][0]), int(base_c1[1] / scales[i][1])) for i, p in enumerate(patch_sizes)]
@@ -169,20 +170,34 @@ def get_scaled_patches(base_c1, patch_sizes):
     return img_c1, img_c2
 
 
-def sample_patch(img_data, patch_sizes, kind='train', val_size=256):
+def sample_patch(img_data, patch_sizes, kind='train', val_size=256, needed_classes=None):
     img_height = img_data[0].shape[0]
     img_width = img_data[0].shape[1]
     patch_size = patch_sizes[0]
 
-    base_c1 = sample_random_corner(img_height, img_width, patch_size, kind, val_size)
-    img_c1, img_c2 = get_scaled_patches(base_c1, patch_sizes)
+    img_patch = None
+    max_tries = 100
+    num_tries = 0
+    for num_tries in range(max_tries):
+        base_c1 = sample_random_corner(img_height, img_width, patch_size, kind, val_size)
+        img_c1, img_c2 = get_scaled_patches_coordinates(base_c1, patch_sizes)
 
-    img_patch = [d[img_c1[i][0]:img_c2[i][0], img_c1[i][1]:img_c2[i][1], :] for i, d in enumerate(img_data)]
+        img_patch = [d[img_c1[i][0]:img_c2[i][0], img_c1[i][1]:img_c2[i][1], :] for i, d in enumerate(img_data)]
 
+        # mask is always the first
+        if needed_classes is None:
+            break
+        else:
+            mask = img_patch[0]
+            mask_needed_fractions = [mask[:, :, cls].sum() / (patch_size[0] * patch_size[1]) for cls in needed_classes]
+            if max(mask_needed_fractions) > 0.01:
+                break
+
+    # logging.info('Found after %s iterations: %s', num_tries, mask_needed_fractions)
     return img_patch
 
 
-def sample_patches(images, data, patch_sizes, nb_samples, kind='train', val_size=256):
+def sample_patches(images, data, patch_sizes, nb_samples, kind='train', val_size=256, needed_classes=None):
     nb_data = len(data)
     nb_data_channels = [d[images[0]].shape[2] for d in data]
     data_sampled = [
@@ -194,7 +209,7 @@ def sample_patches(images, data, patch_sizes, nb_samples, kind='train', val_size
         img_id = np.random.choice(images)
         img_data = [d[img_id] for d in data]
 
-        img_patch = sample_patch(img_data, patch_sizes, kind=kind, val_size=val_size)
+        img_patch = sample_patch(img_data, patch_sizes, kind=kind, val_size=val_size, needed_classes=needed_classes)
 
         for k in range(nb_data):
             data_sampled[k][i] = img_patch[k]
@@ -218,7 +233,7 @@ def split_image_to_patches(data, patch_sizes, overlap=0.5):
     for i in range(nb_steps_height):
         for j in range(nb_steps_width):
             base_c1 = (i * step_size[0], j * step_size[1])
-            img_c1, img_c2 = get_scaled_patches(base_c1, patch_sizes)
+            img_c1, img_c2 = get_scaled_patches_coordinates(base_c1, patch_sizes)
 
             for k, img_data in enumerate(data):
                 img_patch = img_data[img_c1[k][0]:img_c2[k][0], img_c1[k][1]:img_c2[k][1], :]
@@ -228,7 +243,7 @@ def split_image_to_patches(data, patch_sizes, overlap=0.5):
     # leftovers - width
     for i in range(nb_steps_height):
         base_c1 = (i * step_size[0], img_width - patch_size[1])
-        img_c1, img_c2 = get_scaled_patches(base_c1, patch_sizes)
+        img_c1, img_c2 = get_scaled_patches_coordinates(base_c1, patch_sizes)
 
         for k, img_data in enumerate(data):
             img_patch = img_data[img_c1[k][0]:img_c2[k][0], img_c1[k][1]:img_c2[k][1], :]
@@ -238,7 +253,7 @@ def split_image_to_patches(data, patch_sizes, overlap=0.5):
     # leftovers - height
     for j in range(nb_steps_width):
         base_c1 = (img_height - patch_size[0], j * step_size[1])
-        img_c1, img_c2 = get_scaled_patches(base_c1, patch_sizes)
+        img_c1, img_c2 = get_scaled_patches_coordinates(base_c1, patch_sizes)
 
         for k, img_data in enumerate(data):
             img_patch = img_data[img_c1[k][0]:img_c2[k][0], img_c1[k][1]:img_c2[k][1], :]
@@ -247,7 +262,7 @@ def split_image_to_patches(data, patch_sizes, overlap=0.5):
 
     # leftovers - bottom right corner
     base_c1 = (img_height - patch_size[0], img_width - patch_size[1])
-    img_c1, img_c2 = get_scaled_patches(base_c1, patch_sizes)
+    img_c1, img_c2 = get_scaled_patches_coordinates(base_c1, patch_sizes)
     for k, img_data in enumerate(data):
         img_patch = img_data[img_c1[k][0]:img_c2[k][0], img_c1[k][1]:img_c2[k][1], :]
         patches[k].append(img_patch)
@@ -322,6 +337,7 @@ def simplify_mask(mask, kernel_size=5):
 
     return mask_simplified
 
+
 def stack_masks(images, images_masks, classes):
     images_masks_stacked = {
         img_id: np.stack([images_masks[img_id][target_class] for target_class in classes], axis=-1)
@@ -329,5 +345,3 @@ def stack_masks(images, images_masks, classes):
         }
 
     return images_masks_stacked
-
-

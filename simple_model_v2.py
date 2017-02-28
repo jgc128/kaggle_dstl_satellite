@@ -134,21 +134,23 @@ def config():
 
 @ex.named_config
 def big_objects():
-    model_name = 'softmax_without_small_pansharpen_big_objects'
+    model_name = 'softmax_without_small_pansharpen_big_objects_small_patch'
     classes_to_skip = [2, 5, 9, 10]
-    patch_size = [224, 224]
-
+    patch_size = [64, 64]
+    batch_size = 80
 
 @ex.named_config
 def small_objects():
     model_name = 'softmax_without_small_pansharpen_small_objects'
     classes_to_skip = [1, 3, 4, 6, 7, 8]
     patch_size = [64, 64]
+    batch_size = 80
 
 
 @ex.named_config
 def debug_run():
     debug = True
+    model_name = 'debug'
 
     nb_iterations = 100000
     nb_samples_train = 10
@@ -158,15 +160,15 @@ def debug_run():
 
 @ex.named_config
 def prediction():
-    model_load_step = 20700
-    model_name = 'softmax_without_small_pansharpen_big_objects_small_patch'
+    # model_load_step = 20700
+    model_load_step = 47775
     patch_size = [64, 64]
     batch_size = 350
 
 
 @ex.capture
 def evaluate_model_jaccard(model, images, images_masks_stacked, images_data, needed_classes, kind, batch_size):
-    data_dict = sample_data_dict(images, images_masks_stacked, images_data, kind)
+    data_dict = sample_data_dict(images, images_masks_stacked, images_data, kind, needed_classes)
     nb_samples = len(data_dict['X'])
 
     Y_pred_probs = model.predict(data_dict, batch_size=batch_size)
@@ -180,8 +182,8 @@ def evaluate_model_jaccard(model, images, images_masks_stacked, images_data, nee
 
 
 @ex.capture
-def sample_data_dict(images, images_masks_stacked, images_data, kind,
-                     patch_size, nb_samples_train, nb_samples_val, val_size, classes_to_skip):
+def sample_data_dict(images, images_masks_stacked, images_data, kind, needed_classes,
+                     patch_size, nb_samples_train, nb_samples_val, val_size):
     if kind == 'val':
         nb_samples = nb_samples_val
     elif kind == 'train':
@@ -190,10 +192,10 @@ def sample_data_dict(images, images_masks_stacked, images_data, kind,
         raise AttributeError('Kind {} is not supported'.format(kind))
 
     patches = sample_patches(images, [images_masks_stacked, images_data], [patch_size, patch_size],
-                             nb_samples, kind=kind, val_size=val_size)
+                             nb_samples, kind=kind, val_size=val_size, needed_classes=needed_classes)
 
     Y, X = patches[0], patches[1]
-    Y_softmax = convert_masks_to_softmax(Y, classes_to_skip=classes_to_skip)
+    Y_softmax = convert_masks_to_softmax(Y, needed_classes=needed_classes)
 
     data_dict = {'X': X, 'Y': Y, 'Y_softmax': Y_softmax}
 
@@ -273,7 +275,7 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
         jaccard_train_mean = 0
         for iteration_number in range(1, nb_iterations + 1):
             try:
-                data_dict_train = sample_data_dict(images, images_masks_stacked, images_data, 'train')
+                data_dict_train = sample_data_dict(images, images_masks_stacked, images_data, 'train', needed_classes)
                 model.train_model(data_dict_train, nb_epoch=1, batch_size=batch_size)
 
                 # validate the model
