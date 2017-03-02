@@ -43,9 +43,9 @@ def main(model_names, output_name):
 
 if __name__ == '__main__':
     model_names = [
-        'softmax_without_small_pansharpen_big_objects_small_patch',
-        'softmax_without_small_pansharpen_small_objects',
+        'softmax_pansharpen_big_objects_v2',
+        'softmax_pansharpen_small_objects_v2',
     ]
-    output_name = 'softmax_pansharpen'
+    output_name = 'softmax_pansharpen_v2'
 
     main(model_names, output_name)

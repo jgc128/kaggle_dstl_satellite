@@ -24,7 +24,7 @@ import utils.tf as tf_utils
 # https://github.com/fabianbormann/Tensorflow-DeconvNet-Segmentation
 # https://github.com/shekkizh/FCN.tensorflow
 # https://github.com/warmspringwinds/tf-image-segmentation
-
+# https://github.com/MarvinTeichmann/tensorflow-fcn
 
 # def jaccard_coef_loss(y_true, y_pred):
 #     return -K.log(jaccard_coef(y_true, y_pred)) + binary_crossentropy(y_pred, y_true)
@@ -37,7 +37,7 @@ import utils.tf as tf_utils
 # Polyak Averaging
 # RGB + M[0] + M[5:8]
 # tree, water - excluding
-
+# Closing for tracks - http://docs.opencv.org/3.0-beta/doc/py_tutorials/py_imgproc/py_morphological_ops/py_morphological_ops.html
 
 class SimpleModel(BaseModel):
     def __init__(self, **kwargs):

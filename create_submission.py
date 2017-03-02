@@ -12,7 +12,7 @@ import pandas as pd
 from config import SAMPLE_SUBMISSION_FILENAME, IMAGES_PREDICTION_MASK_DIR, IMAGES_METADATA_FILENAME, SUBMISSION_DIR
 from utils.data import load_sample_submission, load_pickle
 from utils.matplotlib import matplotlib_setup, plot_mask
-from utils.polygon import create_polygons_from_mask, simplify_mask
+from utils.polygon import create_polygons_from_mask, simplify_mask, close_mask
 
 
 def save_submission(polygons, submission_order, filename, skip_classes=None):
@@ -40,7 +40,7 @@ def save_submission(polygons, submission_order, filename, skip_classes=None):
     logging.info('Submission saved: %s', os.path.basename(filename))
 
 
-def create_image_polygons(img_masks, img_metadata, scale=True, skip_classes=None):
+def create_image_polygons(img_masks, img_metadata, scale=True, skip_classes=None, min_areas = None):
     if img_masks is None:
         return {}
 
@@ -49,8 +49,11 @@ def create_image_polygons(img_masks, img_metadata, scale=True, skip_classes=None
 
     nb_classes = img_masks.shape[2]
 
+    if min_areas is None:
+        min_areas = {cls:1.0 for cls in range(nb_classes)}
+
     polygons = Parallel(n_jobs=10)(
-        delayed(create_polygons_from_mask)(img_masks[:, :, class_id], img_metadata, scale)
+        delayed(create_polygons_from_mask)(img_masks[:, :, class_id], img_metadata, scale, min_areas[class_id])
         for class_id in range(nb_classes) if class_id not in skip_classes
     )
 
@@ -66,10 +69,18 @@ def main(model_name):
         level=logging.INFO, format="%(asctime)s : %(levelname)s : %(module)s : %(message)s", datefmt="%d-%m-%Y %H:%M:%S"
     )
 
-    matplotlib_setup()
-
+    nb_classes = 10
     skip_classes = None
     double_pass = False
+    use_close = True
+    use_min_area = True
+
+    matplotlib_setup()
+
+    min_areas = {cls: 1.0 for cls in range(nb_classes)}
+    if use_min_area:
+        min_areas[5] = 5000 # crops
+
 
     logging.info('Skip classes: %s', skip_classes)
     logging.info('Mode: %s', 'double pass' if double_pass else 'single pass')
@@ -82,7 +93,7 @@ def main(model_name):
     submission_order = [(row['ImageId'], row['ClassType']) for i, row in sample_submission.iterrows()]
 
     target_images = sorted(set([r[0] for r in submission_order]))
-    # target_images = target_images[:20]
+    # target_images = target_images[:10]
     logging.info('Target images: %s', len(target_images))
 
     polygons = {}
@@ -91,14 +102,22 @@ def main(model_name):
 
         mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, '{0}_{1}.npy'.format(img_id, model_name))
         if os.path.isfile(mask_filename):
-            img_mask = np.load(mask_filename)
+            img_mask = np.load(mask_filename).astype(np.uint8)
         else:
             img_mask = None
+
+        # do closing for roads and tracks
+        img_mask_closed_tmp = close_mask(img_mask, kernel_size=5)
+        img_mask_closed = np.copy(img_mask)
+        img_mask_closed[:, :, [2, 3]] = img_mask_closed_tmp[:, :, [2, 3]]
+
+        if use_close:
+            img_mask = img_mask_closed
 
         if not double_pass:
             # img_mask_simplified = simplify_mask(img_mask, kernel_size=5)
             img_polygons = create_image_polygons(img_mask, img_metadata,
-                                                 scale=True, skip_classes=skip_classes)
+                                                 scale=True, skip_classes=skip_classes, min_areas=min_areas)
         else:
             # img_polygons = create_image_polygons(img_mask, img_metadata, scale=False, skip_classes=skip_classes)
             #
@@ -123,5 +142,5 @@ def main(model_name):
 
 
 if __name__ == '__main__':
-    model_name = 'softmax_pansharpen'
+    model_name = 'softmax_pansharpen_v2'
     main(model_name)

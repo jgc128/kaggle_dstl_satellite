@@ -86,7 +86,7 @@ def main(kind):
             img_poly_true = None
             img_mask_true = None
 
-        plot_image(img_data[:,:,:3])
+        # plot_image(img_data[:,:,:3])
 
         img_mask_pred_simplified = simplify_mask(img_mask_pred, kernel_size=5)
 
@@ -101,13 +101,13 @@ def main(kind):
         # img_poly_pred = create_image_polygons(img_mask_pred, img_metadata, scale=False)
         # plot_polygons(img_data[:,:,:3], img_metadata, img_poly_pred, img_poly_true, title=img_id, show=False)
 
-        # if kind == 'train':
-        #     # convert predicted polygons to mask
-        #     jaccard = jaccard_coef(img_mask_pred, img_mask_true)
-        #     jaccards.append(jaccard)
-        #     jaccard_simplified = jaccard_coef(img_mask_pred_simplified, img_mask_true)
-        #     jaccards_simplified.append(jaccard_simplified)
-        #     logging.info('Image: %s, jaccard: %s, jaccard simplified: %s', img_id, jaccard, jaccard_simplified)
+        if kind == 'train':
+            # convert predicted polygons to mask
+            jaccard = jaccard_coef(img_mask_pred, img_mask_true)
+            jaccards.append(jaccard)
+            jaccard_simplified = jaccard_coef(img_mask_pred_simplified, img_mask_true)
+            jaccards_simplified.append(jaccard_simplified)
+            logging.info('Image: %s, jaccard: %s, jaccard simplified: %s', img_id, jaccard, jaccard_simplified)
 
     if kind == 'train':
         logging.info('Mean jaccard: %s, Mean jaccard simplified: %s', np.mean(jaccards), np.mean(jaccards_simplified))

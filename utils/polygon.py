@@ -117,9 +117,9 @@ def mask_to_polygons_v2(mask, min_area=1.0):
     return all_polygons
 
 
-def create_polygons_from_mask(mask, image_metadata, scale=True):
-    poly = mask_to_polygons(mask, min_area=1.0, epsilon=1)
-    # poly = mask_to_polygons_v2(mask, min_area=20)
+def create_polygons_from_mask(mask, image_metadata, scale=True, min_area=1.0):
+    poly = mask_to_polygons(mask, min_area=min_area, epsilon=1)
+    # poly = mask_to_polygons_v2(mask, min_area=min_area)
 
     if scale:
         x_scaler = image_metadata['x_rgb_scaler']
@@ -328,7 +328,7 @@ def simplify_mask(mask, kernel_size=5):
     for i in range(nb_classes):
         msk = mask[:, :, i]
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
         msk_handled = cv2.morphologyEx(msk, cv2.MORPH_OPEN, kernel)
 
         mask_simplified.append(msk_handled)
@@ -337,6 +337,21 @@ def simplify_mask(mask, kernel_size=5):
 
     return mask_simplified
 
+def close_mask(mask, kernel_size=5):
+    nb_classes = mask.shape[2]
+
+    mask_simplified = []
+    for i in range(nb_classes):
+        msk = mask[:, :, i]
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+        msk_handled = cv2.morphologyEx(msk, cv2.MORPH_CLOSE, kernel)
+
+        mask_simplified.append(msk_handled)
+
+    mask_simplified = np.stack(mask_simplified, axis=-1)
+
+    return mask_simplified
 
 def stack_masks(images, images_masks, classes):
     images_masks_stacked = {

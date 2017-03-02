@@ -6,6 +6,11 @@ from sacred import Experiment
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+# inception = tf.contrib.slim.nets.inception
+import tensorflow.contrib.slim.nets
+from tensorflow.contrib.slim.nets import resnet_v2
+from tensorflow.contrib.slim.nets import resnet_utils
+# import tensorflow.contrib.slim.nets.resnet_v2 as resnet_v2
 from tensorflow_helpers.models.base_model import BaseModel
 
 from config import CLASSES_NAMES, IMAGES_NORMALIZED_SHARPENED_FILENAME, IMAGES_MASKS_FILENAME, IMAGES_METADATA_FILENAME, \
@@ -22,10 +27,10 @@ class SimpleModel(BaseModel):
 
         self.nb_classes = kwargs.get('nb_classes')
 
-        self.regularization = kwargs.get('regularization', 0.0005)
+        self.regularization = kwargs.get('regularization', 0.005)
 
     def build_model(self):
-        batch_norm_params = {'is_training': self.is_train, 'decay': 0.999, 'updates_collections': None}
+        batch_norm_params = {'is_training': self.is_train, 'decay': 0.999,}
 
         with tf.name_scope('input'):
             input = self.input_dict['X']
@@ -103,7 +108,95 @@ class SimpleModel(BaseModel):
             loss_ce = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1, 2]))
 
             tf.losses.add_loss(loss_ce)
-            self.op_loss = tf.losses.get_total_loss(add_regularization_losses=True)
+
+            total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
+
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+            if update_ops:
+                updates = tf.group(*update_ops)
+                with tf.control_dependencies([updates]):
+                    total_loss = tf.identity(total_loss)
+
+            self.op_loss = total_loss
+
+
+class ResNetModel(BaseModel):
+    def __init__(self, **kwargs):
+        super(ResNetModel, self).__init__()
+        logging.info('Creating model: %s', type(self).__name__)
+
+        self.nb_classes = kwargs.get('nb_classes')
+
+        self.regularization = kwargs.get('regularization', 0.0005)
+
+    def build_model(self):
+        with tf.name_scope('input'):
+            input = self.input_dict['X']
+
+            targets = self.input_dict['Y_softmax']
+            targets_one_hot = tf.one_hot(targets, self.nb_classes + 1)
+
+
+        # with slim.arg_scope(inception.inception_v3_arg_scope()):
+        #     net, endpoints = inception.inception_v3(input, is_training=self.is_train)
+        #     zzz = 0
+        with slim.arg_scope(resnet_utils.resnet_arg_scope(is_training=self.is_train)):
+            net, end_points = resnet_v2.resnet_v2_101(input,
+                                                      num_classes=None,
+                                                      global_pool=False,
+                                                      output_stride=16)
+            zzz = 0
+
+        with tf.name_scope('upsamplig'):
+
+            # upsampling
+
+            # first, upsample x2
+            net = slim.conv2d_transpose(net, 256, [4, 4], stride=2, scope='upsample_1')
+            block1_scored = slim.conv2d(end_points['resnet_v2_101/block1'], 256, [1, 1], scope='upsample_1_scored', activation_fn=None)
+            net = net + block1_scored
+
+            # second, upsample x2
+            net = slim.conv2d_transpose(net, 128, [4, 4], stride=2, scope='upsample_2')
+            block2_scored = slim.conv2d(end_points['resnet_v2_101/block1/unit_1/bottleneck_v2'], 128, [1, 1], scope='upsample_2_scored', activation_fn=None)
+            net = net + block2_scored
+
+            # finally, upsample x4
+            net = slim.conv2d_transpose(net, 64, [16, 16], stride=4, scope='upsample_3')
+
+            # add a few conv layers as the output
+            net = slim.conv2d(net, 32, [3, 3], scope='conv8_1')
+            net = slim.conv2d(net, 32, [3, 3], scope='conv8_2')
+
+        ########
+        # Logits
+        with slim.arg_scope([slim.conv2d, ],
+                            normalizer_fn=slim.batch_norm,
+                            weights_regularizer=slim.l2_regularizer(self.regularization)
+                            ):
+            logits = slim.conv2d(net, self.nb_classes + 1, [1, 1], scope='conv_final_classes', activation_fn=None)
+
+        with tf.name_scope('prediction'):
+            classes_probs = tf.nn.softmax(logits)
+
+            self.op_predict = classes_probs
+
+        with tf.name_scope('loss'):
+            cross_entropy = tf.nn.softmax_cross_entropy_with_logits(labels=targets_one_hot, logits=logits)
+            loss_ce = tf.reduce_mean(tf.reduce_sum(cross_entropy, axis=[1, 2]))
+
+            tf.losses.add_loss(loss_ce)
+
+            total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
+
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+            if update_ops:
+                updates = tf.group(*update_ops)
+                with tf.control_dependencies([updates]):
+                    total_loss = tf.identity(total_loss)
+
+            self.op_loss = total_loss
+
 
 
 ex_name = 'simple_model_v2'
@@ -121,12 +214,12 @@ def config():
     patch_size = [224, 224]
     val_size = 256
 
-    nb_iterations = 100000
+    nb_iterations = 1000000
     nb_samples_train = 1000
     nb_samples_val = 512
     batch_size = 30
 
-    regularization = 0.0005
+    regularization = 0.005
 
     model_load_step = -1
     debug = False
@@ -134,17 +227,22 @@ def config():
 
 @ex.named_config
 def big_objects():
-    model_name = 'softmax_without_small_pansharpen_big_objects_small_patch'
+    model_name = 'softmax_pansharpen_big_objects_v2' # 'softmax_without_small_pansharpen_big_objects_small_patch'
     classes_to_skip = [2, 5, 9, 10]
     patch_size = [64, 64]
-    batch_size = 80
+    batch_size = 200
+
+    model_load_step = 22875 # big
+
 
 @ex.named_config
 def small_objects():
-    model_name = 'softmax_without_small_pansharpen_small_objects'
+    model_name = 'softmax_pansharpen_small_objects_v2' #'softmax_without_small_pansharpen_small_objects'
     classes_to_skip = [1, 3, 4, 6, 7, 8]
     patch_size = [64, 64]
-    batch_size = 80
+    batch_size = 200
+
+    model_load_step = 29400 # small
 
 
 @ex.named_config
@@ -160,9 +258,9 @@ def debug_run():
 
 @ex.named_config
 def prediction():
-    # model_load_step = 20700
-    model_load_step = 47775
-    patch_size = [64, 64]
+    # model_load_step = 22875 # big
+    # model_load_step = 29400 # small
+    # patch_size = [64, 64]
     batch_size = 350
 
 
