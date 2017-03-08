@@ -19,10 +19,12 @@ def main(model_names, output_name):
     for mn in model_names:
         logging.info(' - %s', mn)
 
+    logging.info('Output masks: %s', output_name)
+
     images_all, images_train, images_test = get_train_test_images_ids()
     logging.info('Train: %s, test: %s, all: %s', len(images_train), len(images_test), len(images_all))
 
-    target_images = images_test
+    target_images = images_train
     logging.info('Target images: %s', len(target_images))
     for img_number, img_id in enumerate(target_images):
         img_masks_filenames = [
@@ -43,9 +45,9 @@ def main(model_names, output_name):
 
 if __name__ == '__main__':
     model_names = [
-        'softmax_pansharpen_big_objects_v2',
-        'softmax_pansharpen_small_objects_v2',
+        'softmax_pansharpen_tiramisu_big_objects',
+        'softmax_pansharpen_tiramisu_small_objects',
     ]
-    output_name = 'softmax_pansharpen_v2'
+    output_name = 'softmax_pansharpen_tiramisu'
 
     main(model_names, output_name)

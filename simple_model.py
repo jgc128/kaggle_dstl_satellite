@@ -25,6 +25,7 @@ import utils.tf as tf_utils
 # https://github.com/shekkizh/FCN.tensorflow
 # https://github.com/warmspringwinds/tf-image-segmentation
 # https://github.com/MarvinTeichmann/tensorflow-fcn
+# https://github.com/SimJeg/FC-DenseNet
 
 # def jaccard_coef_loss(y_true, y_pred):
 #     return -K.log(jaccard_coef(y_true, y_pred)) + binary_crossentropy(y_pred, y_true)

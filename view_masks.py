@@ -59,7 +59,7 @@ def main(kind):
 
     jaccards = []
     jaccards_simplified = []
-    model_name = 'softmax_without_small_pansharpen_big_objects_small_patch'
+    model_name = 'softmax_pansharpen_tiramisu_small_patch'
     for img_idx, img_id in enumerate(target_images):
         if img_id !=  '6040_4_4': # 6010_1_2 6040_4_4 6060_2_3
             continue

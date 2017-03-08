@@ -30,7 +30,7 @@ class SimpleModel(BaseModel):
         self.regularization = kwargs.get('regularization', 0.005)
 
     def build_model(self):
-        batch_norm_params = {'is_training': self.is_train, 'decay': 0.999,}
+        batch_norm_params = {'is_training': self.is_train, 'decay': 0.999, }
 
         with tf.name_scope('input'):
             input = self.input_dict['X']
@@ -136,7 +136,6 @@ class ResNetModel(BaseModel):
             targets = self.input_dict['Y_softmax']
             targets_one_hot = tf.one_hot(targets, self.nb_classes + 1)
 
-
         # with slim.arg_scope(inception.inception_v3_arg_scope()):
         #     net, endpoints = inception.inception_v3(input, is_training=self.is_train)
         #     zzz = 0
@@ -148,17 +147,18 @@ class ResNetModel(BaseModel):
             zzz = 0
 
         with tf.name_scope('upsamplig'):
-
             # upsampling
 
             # first, upsample x2
             net = slim.conv2d_transpose(net, 256, [4, 4], stride=2, scope='upsample_1')
-            block1_scored = slim.conv2d(end_points['resnet_v2_101/block1'], 256, [1, 1], scope='upsample_1_scored', activation_fn=None)
+            block1_scored = slim.conv2d(end_points['resnet_v2_101/block1'], 256, [1, 1], scope='upsample_1_scored',
+                                        activation_fn=None)
             net = net + block1_scored
 
             # second, upsample x2
             net = slim.conv2d_transpose(net, 128, [4, 4], stride=2, scope='upsample_2')
-            block2_scored = slim.conv2d(end_points['resnet_v2_101/block1/unit_1/bottleneck_v2'], 128, [1, 1], scope='upsample_2_scored', activation_fn=None)
+            block2_scored = slim.conv2d(end_points['resnet_v2_101/block1/unit_1/bottleneck_v2'], 128, [1, 1],
+                                        scope='upsample_2_scored', activation_fn=None)
             net = net + block2_scored
 
             # finally, upsample x4
@@ -198,6 +198,108 @@ class ResNetModel(BaseModel):
             self.op_loss = total_loss
 
 
+class TiramisuModel(BaseModel):
+    def __init__(self, **kwargs):
+        super(TiramisuModel, self).__init__()
+        logging.info('Creating model: %s', type(self).__name__)
+
+        self.nb_classes = kwargs.get('nb_classes')
+
+        self.regularization = kwargs.get('regularization', 0.005)
+
+    def _layer(self, inpt, nb_filters, scope=None):
+        l = slim.conv2d(inpt, nb_filters, [3, 3], activation_fn=tf.nn.relu, normalizer_fn=slim.batch_norm, scope=scope)
+        l = slim.dropout(l, keep_prob=0.8, is_training=self.is_train, scope=scope)
+        return l
+
+    def _transition_down(self, inpt, nb_filters, scope=None):
+        l = slim.conv2d(inpt, nb_filters, [1, 1], activation_fn=tf.nn.relu, normalizer_fn=slim.batch_norm, scope=scope)
+        l = slim.dropout(l, keep_prob=0.8, is_training=self.is_train, scope=scope)
+        l = slim.max_pool2d(l, [2, 2], scope=scope)
+        return l
+
+    def _transition_up(self, inpt, nb_filters, scope=None):
+        l = slim.conv2d_transpose(inpt, nb_filters, [3, 3], stride=2, normalizer_fn=slim.batch_norm, scope=scope)
+        return l
+
+    def _dense_block(self, inpt, nb_filters, nb_layers, scope=None):
+        outputs = []
+        inpt_i = inpt
+        for i in range(nb_layers):
+            l = self._layer(inpt_i, nb_filters=nb_filters, scope=str(scope) + '/l' + str(i + 1))
+
+            outputs.append(l)
+            inpt_i = tf.concat([inpt_i, l], axis=-1)
+
+        oupt = tf.concat(outputs, axis=-1)
+        return oupt
+
+    def build_model(self):
+        with tf.variable_scope('input'):
+            input = self.input_dict['X']
+
+            targets = self.input_dict['Y_softmax']
+            targets_one_hot = tf.one_hot(targets, self.nb_classes + 1)
+
+        with tf.variable_scope('tiramisu'):
+            nb_layers_per_block = [4, 5, 7, 10, ] # 12,
+            nb_layers_bottleneck = 12 # 15
+            nb_filters_initial = 48
+            growth_rate = 16
+
+            initial = slim.conv2d(input, nb_filters_initial, [3, 3], normalizer_fn=slim.batch_norm, scope='initial')
+
+            with tf.variable_scope('down'):
+                dense_blocks = []
+                inpt_i = initial
+                for i, nb_layers in enumerate(nb_layers_per_block):
+                    db = self._dense_block(inpt_i, growth_rate, nb_layers, scope='DB_' + str(nb_layers) + '_layers')
+                    db_concat = tf.concat([db, inpt_i], axis=-1)
+
+                    nb_filters = db_concat.get_shape()[3]
+                    td = self._transition_down(db_concat, nb_filters, scope='TD_' + str(nb_layers) + '_layers')
+
+                    dense_blocks.append(db_concat)
+                    inpt_i = td
+
+            with tf.variable_scope('bottleneck'):
+                db = self._dense_block(inpt_i, growth_rate, nb_layers_bottleneck, scope='DB_' + str(nb_layers_bottleneck) + '_layers')
+                db_concat = tf.concat([db, inpt_i], axis=-1)
+
+            nb_layers_last = nb_layers_bottleneck
+            with tf.variable_scope('up'):
+                inpt_i = db_concat
+                for i, nb_layers in reversed(list(enumerate(nb_layers_per_block))):
+                    tu = self._transition_up(inpt_i, nb_layers_last * growth_rate, scope='TU_' + str(nb_layers) + '_layers')
+                    db = self._dense_block(tu, growth_rate, nb_layers, scope='DB_' + str(nb_layers) + '_layers')
+                    db_concat = tf.concat([tu, db, dense_blocks[i]], axis=-1)
+
+                    inpt_i = db_concat
+                    nb_layers_last = nb_layers
+
+            with tf.variable_scope('logits'):
+                logits = slim.conv2d(inpt_i, self.nb_classes + 1, [1, 1], scope='conv_final_classes', activation_fn=None, normalizer_fn=slim.batch_norm)
+
+            with tf.name_scope('prediction'):
+                classes_probs = tf.nn.softmax(logits)
+
+                self.op_predict = classes_probs
+
+            with tf.name_scope('loss'):
+                cross_entropy = tf.nn.softmax_cross_entropy_with_logits(labels=targets_one_hot, logits=logits)
+                loss_ce = tf.reduce_mean(tf.reduce_mean(cross_entropy, axis=[1, 2]))
+
+                tf.losses.add_loss(loss_ce)
+
+                total_loss = tf.losses.get_total_loss(add_regularization_losses=True)
+
+                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                if update_ops:
+                    updates = tf.group(*update_ops)
+                    with tf.control_dependencies([updates]):
+                        total_loss = tf.identity(total_loss)
+
+                self.op_loss = total_loss
 
 ex_name = 'simple_model_v2'
 ex = Experiment(ex_name)
@@ -227,22 +329,22 @@ def config():
 
 @ex.named_config
 def big_objects():
-    model_name = 'softmax_pansharpen_big_objects_v2' # 'softmax_without_small_pansharpen_big_objects_small_patch'
+    model_name = 'softmax_pansharpen_tiramisu_big_objects'
     classes_to_skip = [2, 5, 9, 10]
     patch_size = [64, 64]
-    batch_size = 200
+    batch_size = 50
 
-    model_load_step = 22875 # big
+    model_load_step = 18786 # big
 
 
 @ex.named_config
 def small_objects():
-    model_name = 'softmax_pansharpen_small_objects_v2' #'softmax_without_small_pansharpen_small_objects'
+    model_name = 'softmax_pansharpen_tiramisu_small_objects'
     classes_to_skip = [1, 3, 4, 6, 7, 8]
     patch_size = [64, 64]
-    batch_size = 200
+    batch_size = 50
 
-    model_load_step = 29400 # small
+    model_load_step = 20760 # small
 
 
 @ex.named_config
@@ -261,7 +363,7 @@ def prediction():
     # model_load_step = 22875 # big
     # model_load_step = 29400 # small
     # patch_size = [64, 64]
-    batch_size = 350
+    batch_size = 250
 
 
 @ex.capture
@@ -290,7 +392,7 @@ def sample_data_dict(images, images_masks_stacked, images_data, kind, needed_cla
         raise AttributeError('Kind {} is not supported'.format(kind))
 
     patches = sample_patches(images, [images_masks_stacked, images_data], [patch_size, patch_size],
-                             nb_samples, kind=kind, val_size=val_size, needed_classes=needed_classes)
+                             nb_samples, kind=kind, val_size=val_size, needed_classes=None) # needed_classes
 
     Y, X = patches[0], patches[1]
     Y_softmax = convert_masks_to_softmax(Y, needed_classes=needed_classes)
@@ -354,7 +456,7 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
         'nb_classes': nb_needed_classes,
         'regularization': regularization,
     }
-    model = SimpleModel(**model_params)
+    model = TiramisuModel(**model_params)
     model.set_session(sess)
     if not debug:
         model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, model_name))
@@ -364,6 +466,7 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
     model.add_input('Y_softmax', [patch_size[0], patch_size[1], ], dtype=tf.uint8)
 
     model.build_model()
+
 
     # train model
     if model_load_step == -1:
@@ -396,13 +499,17 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
                     model.write_scalar_summary('jaccard_mean/train', jaccard_train_mean)
 
                 # save the model
-                if iteration_number % 15 == 0:
+                if iteration_number % 500 == 0:
                     model_filename = os.path.join(MODELS_DIR, model_name)
                     saved_filename = model.save_model(model_filename)
                     logging.info('Model saved: %s', saved_filename)
 
             except KeyboardInterrupt:
                 break
+
+        model_filename = os.path.join(MODELS_DIR, model_name)
+        saved_filename = model.save_model(model_filename)
+        logging.info('Model saved: %s', saved_filename)
 
         result = {
             'iteration': iteration_number,
@@ -418,7 +525,7 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
         model.restore_model(model_filename)
         logging.info('Model restored: %s', os.path.basename(model_filename))
 
-        target_images = images_test
+        target_images = images_train
         for img_number, img_id in enumerate(target_images):
             img_filename = os.path.join(IMAGES_NORMALIZED_DATA_DIR, img_id + '.pkl')
             img_normalized = load_pickle(img_filename)

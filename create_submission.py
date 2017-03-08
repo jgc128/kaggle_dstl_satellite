@@ -72,8 +72,8 @@ def main(model_name):
     nb_classes = 10
     skip_classes = None
     double_pass = False
-    use_close = True
-    use_min_area = True
+    use_close = False
+    use_min_area = False
 
     matplotlib_setup()
 
@@ -107,11 +107,11 @@ def main(model_name):
             img_mask = None
 
         # do closing for roads and tracks
-        img_mask_closed_tmp = close_mask(img_mask, kernel_size=5)
-        img_mask_closed = np.copy(img_mask)
-        img_mask_closed[:, :, [2, 3]] = img_mask_closed_tmp[:, :, [2, 3]]
-
         if use_close:
+            img_mask_closed_tmp = close_mask(img_mask, kernel_size=5)
+            img_mask_closed = np.copy(img_mask)
+            img_mask_closed[:, :, [2, 3]] = img_mask_closed_tmp[:, :, [2, 3]]
+
             img_mask = img_mask_closed
 
         if not double_pass:
@@ -141,6 +141,7 @@ def main(model_name):
     save_submission(polygons, submission_order, submission_filename, skip_classes=skip_classes)
 
 
+
 if __name__ == '__main__':
-    model_name = 'softmax_pansharpen_v2'
+    model_name = 'softmax_pansharpen_tiramisu_small_patch'
     main(model_name)
