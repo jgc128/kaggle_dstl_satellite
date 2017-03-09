@@ -305,3 +305,15 @@ def get_train_test_images_ids():
     test_images = sorted(set(all_images) - set(train_images))
 
     return all_images, train_images, test_images
+
+
+def save_prediction_mask(directory, masks, img_id, model_name):
+    mask_filename = os.path.join(directory, '{0}_{1}.npz'.format(img_id, model_name))
+    np.savez_compressed(mask_filename, masks)
+
+def load_prediction_mask(directory, img_id, model_name):
+    mask_filename = os.path.join(directory, '{0}_{1}.npz'.format(img_id, model_name))
+    masks = np.load(mask_filename)
+
+    masks = masks['arr_0']
+    return masks

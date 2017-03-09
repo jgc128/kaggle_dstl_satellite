@@ -15,7 +15,8 @@ from tensorflow_helpers.models.base_model import BaseModel
 
 from config import CLASSES_NAMES, IMAGES_NORMALIZED_SHARPENED_FILENAME, IMAGES_MASKS_FILENAME, IMAGES_METADATA_FILENAME, \
     IMAGES_MEANS_STDS_FILENAME, TENSORBOARD_DIR, MODELS_DIR, IMAGES_NORMALIZED_DATA_DIR, IMAGES_PREDICTION_MASK_DIR
-from utils.data import load_pickle, convert_masks_to_softmax, convert_softmax_to_masks, get_train_test_images_ids
+from utils.data import load_pickle, convert_masks_to_softmax, convert_softmax_to_masks, get_train_test_images_ids, \
+    save_prediction_mask
 from utils.matplotlib import matplotlib_setup
 from utils.polygon import stack_masks, sample_patches, jaccard_coef, split_image_to_patches, join_mask_patches
 
@@ -324,27 +325,25 @@ def config():
     regularization = 0.005
 
     model_load_step = -1
+    prediction_images = 'train'
     debug = False
 
 
 @ex.named_config
 def big_objects():
-    model_name = 'softmax_pansharpen_tiramisu_big_objects'
     classes_to_skip = [2, 5, 9, 10]
-    patch_size = [64, 64]
-    batch_size = 50
-
-    model_load_step = 18786 # big
-
 
 @ex.named_config
 def small_objects():
-    model_name = 'softmax_pansharpen_tiramisu_small_objects'
     classes_to_skip = [1, 3, 4, 6, 7, 8]
-    patch_size = [64, 64]
+
+@ex.named_config
+def model_vgg():
+    model_name = 'softmax_pansharpen_vgg_big_objects'
+    model_class = 'SimpleModel'
+    patch_size = [128, 128]
     batch_size = 50
 
-    model_load_step = 20760 # small
 
 
 @ex.named_config
@@ -352,7 +351,7 @@ def debug_run():
     debug = True
     model_name = 'debug'
 
-    nb_iterations = 100000
+    nb_iterations = 3
     nb_samples_train = 10
     nb_samples_val = 5
     batch_size = 5
@@ -360,10 +359,19 @@ def debug_run():
 
 @ex.named_config
 def prediction():
-    # model_load_step = 22875 # big
-    # model_load_step = 29400 # small
-    # patch_size = [64, 64]
-    batch_size = 250
+    model_load_step = 8500
+    # batch_size = 100
+    # patch_size = [128, 128]
+
+    patch_size = [1600, 1600]
+    batch_size = 1
+
+
+@ex.capture
+def create_model(model_params, model_class):
+    logging.info('Creating model: %s', model_class)
+    return globals()[model_class](**model_params)
+
 
 
 @ex.capture
@@ -403,7 +411,8 @@ def sample_data_dict(images, images_masks_stacked, images_data, kind, needed_cla
 
 
 @ex.main
-def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, debug, regularization, model_load_step):
+def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, debug, regularization,
+         model_load_step, prediction_images):
     # set-up matplotlib
     matplotlib_setup()
 
@@ -456,7 +465,7 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
         'nb_classes': nb_needed_classes,
         'regularization': regularization,
     }
-    model = TiramisuModel(**model_params)
+    model = create_model(model_params)  #SimpleModel(**model_params)
     model.set_session(sess)
     if not debug:
         model.set_tensorboard_dir(os.path.join(TENSORBOARD_DIR, model_name))
@@ -525,12 +534,22 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
         model.restore_model(model_filename)
         logging.info('Model restored: %s', os.path.basename(model_filename))
 
-        target_images = images_train
+        if prediction_images == 'train':
+            target_images = images_train
+        elif prediction_images == 'test':
+            target_images = images_test
+        else:
+            raise ValueError('Prediction images `{}` unknown'.format(prediction_images))
+
         for img_number, img_id in enumerate(target_images):
+            if img_id != '6060_2_3':
+                continue
+
             img_filename = os.path.join(IMAGES_NORMALIZED_DATA_DIR, img_id + '.pkl')
             img_normalized = load_pickle(img_filename)
 
-            patches, patches_coord = split_image_to_patches([img_normalized, ], [patch_size, ], overlap=0.5)
+            patches, patches_coord = split_image_to_patches([img_normalized, ], [patch_size, ], overlap=0.8)
+            logging.info('Patches: %s', len(patches[0]))
 
             X = patches[0]
 
@@ -557,8 +576,7 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
 
             masks = np.stack(masks_all, axis=-1)
 
-            mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, '{0}_{1}.npy'.format(img_id, model_name))
-            np.save(mask_filename, masks)
+            save_prediction_mask(IMAGES_PREDICTION_MASK_DIR, masks, img_id, model_name)
 
             logging.info('Predicted: %s/%s [%.2f]',
                          img_number + 1, len(target_images), 100 * (img_number + 1) / len(target_images))
@@ -567,6 +585,7 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
 
         }
         return result
+
 
 
 if __name__ == '__main__':
