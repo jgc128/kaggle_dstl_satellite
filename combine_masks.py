@@ -4,7 +4,7 @@ import logging
 import numpy as np
 
 from config import IMAGES_PREDICTION_MASK_DIR
-from utils.data import get_train_test_images_ids
+from utils.data import get_train_test_images_ids, load_prediction_mask, save_prediction_mask
 from utils.matplotlib import matplotlib_setup
 
 
@@ -27,17 +27,15 @@ def main(model_names, output_name):
     target_images = images_train
     logging.info('Target images: %s', len(target_images))
     for img_number, img_id in enumerate(target_images):
-        img_masks_filenames = [
-            os.path.join(IMAGES_PREDICTION_MASK_DIR, '{0}_{1}.npy'.format(img_id, model_name))
-            for model_name in model_names
-            ]
-        img_masks = [np.load(mf) for mf in img_masks_filenames]
+        if img_id != '6060_2_3':
+            continue
+
+        img_masks = [load_prediction_mask(IMAGES_PREDICTION_MASK_DIR, img_id, model_name) for model_name in model_names]
         img_masks = np.array(img_masks)
 
         img_masks_combined = np.sum(img_masks, axis=0)
 
-        mask_combined_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, '{0}_{1}.npy'.format(img_id, output_name))
-        np.save(mask_combined_filename, img_masks_combined)
+        save_prediction_mask(IMAGES_PREDICTION_MASK_DIR, img_masks_combined, img_id, output_name)
 
         logging.info('Combined: %s/%s [%.2f]',
                      img_number + 1, len(target_images), 100 * (img_number + 1) / len(target_images))
