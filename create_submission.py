@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from config import SAMPLE_SUBMISSION_FILENAME, IMAGES_PREDICTION_MASK_DIR, IMAGES_METADATA_FILENAME, SUBMISSION_DIR
-from utils.data import load_sample_submission, load_pickle
+from utils.data import load_sample_submission, load_pickle, load_prediction_mask
 from utils.matplotlib import matplotlib_setup, plot_mask
 from utils.polygon import create_polygons_from_mask, simplify_mask, close_mask
 
@@ -100,10 +100,9 @@ def main(model_name):
     for i, img_id in enumerate(target_images):
         img_metadata = images_metadata[img_id]
 
-        mask_filename = os.path.join(IMAGES_PREDICTION_MASK_DIR, '{0}_{1}.npy'.format(img_id, model_name))
-        if os.path.isfile(mask_filename):
-            img_mask = np.load(mask_filename).astype(np.uint8)
-        else:
+        try:
+            img_mask = load_prediction_mask(IMAGES_PREDICTION_MASK_DIR, img_id, model_name)
+        except IOError:
             img_mask = None
 
         # do closing for roads and tracks
@@ -134,7 +133,7 @@ def main(model_name):
         polygons[img_id] = img_polygons
 
         if (i + 1) % 10 == 0:
-            logging.info('Processed images: %s/%s [%.2f%%]',
+            logging.info('\n\nProcessed images: %s/%s [%.2f%%]\n\n',
                          i + 1, len(target_images), 100 * (i + 1) / len(target_images))
 
     submission_filename = os.path.join(SUBMISSION_DIR, 'submission_{}.csv'.format(model_name))
@@ -143,5 +142,5 @@ def main(model_name):
 
 
 if __name__ == '__main__':
-    model_name = 'softmax_pansharpen_tiramisu_small_patch'
+    model_name = 'softmax_pansharpen_tiramisu'
     main(model_name)

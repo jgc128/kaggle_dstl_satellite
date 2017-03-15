@@ -24,11 +24,11 @@ def main(model_names, output_name):
     images_all, images_train, images_test = get_train_test_images_ids()
     logging.info('Train: %s, test: %s, all: %s', len(images_train), len(images_test), len(images_all))
 
-    target_images = images_train
+    target_images = images_test
     logging.info('Target images: %s', len(target_images))
     for img_number, img_id in enumerate(target_images):
-        if img_id != '6060_2_3':
-            continue
+        # if img_id != '6060_2_3':
+        #     continue
 
         img_masks = [load_prediction_mask(IMAGES_PREDICTION_MASK_DIR, img_id, model_name) for model_name in model_names]
         img_masks = np.array(img_masks)

@@ -356,7 +356,7 @@ def config():
     regularization = 0.0005
 
     model_load_step = -1
-    prediction_images = 'train'
+    prediction_images = 'test'
     debug = False
 
 
@@ -364,14 +364,14 @@ def config():
 def big_objects():
     classes_to_skip = [2, 5, 9, 10]
     model_name_suffix = 'big_objects'
-    # model_load_step = 10875
+    model_load_step = 15125
 
 
 @ex.named_config
 def small_objects():
     classes_to_skip = [1, 3, 4, 6, 7, 8]
     model_name_suffix = 'small_objects'
-    # model_load_step = 11225
+    model_load_step = 17675
 
 @ex.named_config
 def model_vgg():
@@ -586,8 +586,8 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
             raise ValueError('Prediction images `{}` unknown'.format(prediction_images))
 
         for img_number, img_id in enumerate(target_images):
-            if img_id != '6060_2_3':
-                continue
+            # if img_id != '6060_2_3':
+            #     continue
 
             img_filename = os.path.join(IMAGES_NORMALIZED_DATA_DIR, img_id + '.pkl')
             img_normalized = load_pickle(img_filename)
