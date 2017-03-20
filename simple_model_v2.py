@@ -14,7 +14,8 @@ from tensorflow.contrib.slim.nets import resnet_utils
 from tensorflow_helpers.models.base_model import BaseModel
 
 from config import CLASSES_NAMES, IMAGES_NORMALIZED_SHARPENED_FILENAME, IMAGES_MASKS_FILENAME, IMAGES_METADATA_FILENAME, \
-    IMAGES_MEANS_STDS_FILENAME, TENSORBOARD_DIR, MODELS_DIR, IMAGES_NORMALIZED_DATA_DIR, IMAGES_PREDICTION_MASK_DIR
+    IMAGES_MEANS_STDS_FILENAME, TENSORBOARD_DIR, MODELS_DIR, IMAGES_NORMALIZED_DATA_DIR, IMAGES_PREDICTION_MASK_DIR, \
+    IMAGES_TEST_REAL
 from utils.data import load_pickle, convert_masks_to_softmax, convert_softmax_to_masks, get_train_test_images_ids, \
     save_prediction_mask
 from utils.matplotlib import matplotlib_setup
@@ -356,7 +357,7 @@ def config():
     regularization = 0.0005
 
     model_load_step = -1
-    prediction_images = 'test'
+    prediction_images = 'test_real' # 'train'
     debug = False
 
 
@@ -364,18 +365,18 @@ def config():
 def big_objects():
     classes_to_skip = [2, 5, 9, 10]
     model_name_suffix = 'big_objects'
-    model_load_step = 15125
+    model_load_step = 59275
 
 
 @ex.named_config
 def small_objects():
     classes_to_skip = [1, 3, 4, 6, 7, 8]
     model_name_suffix = 'small_objects'
-    model_load_step = 17675
+    model_load_step = 64062
 
 @ex.named_config
 def model_vgg():
-    model_name_prefix = 'softmax_pansharpen_vgg'
+    model_name_prefix = 'softmax_pansharpen_vgg_for_ws'
     model_class = 'SimpleModel'
     patch_size = [128, 128]
     batch_size = 50
@@ -407,7 +408,8 @@ def prediction():
     # batch_size = 100
     # patch_size = [128, 128]
 
-    patch_size = [960, 960]
+    # patch_size = [960, 960] # tiramisu
+    patch_size = [1600, 1600] # simple_model
     batch_size = 1
 
 
@@ -578,10 +580,14 @@ def main(model_name, classes_to_skip, patch_size, nb_iterations, batch_size, deb
         model.restore_model(model_filename)
         logging.info('Model restored: %s', os.path.basename(model_filename))
 
+        logging.info('Target images: %s', prediction_images)
+
         if prediction_images == 'train':
             target_images = images_train
         elif prediction_images == 'test':
             target_images = images_test
+        elif prediction_images == 'test_real':
+            target_images = IMAGES_TEST_REAL
         else:
             raise ValueError('Prediction images `{}` unknown'.format(prediction_images))
 

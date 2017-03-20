@@ -44,6 +44,7 @@ def get_intersections(images, images_masks, i, j, mode='union'):
 def plot_intersections(intersection_data, id2class):
     import matplotlib.pyplot as plt
     import seaborn as sns
+    sns.set(font_scale=2)
 
     fig, ax = plt.subplots(figsize=(7, 7))
 
@@ -91,6 +92,7 @@ def main():
         intersections.append(inter)
 
         logging.info('Finished %s/%s [%.2f%%, classes %s - %s]', k + 1, len(permutations), 100 * (k + 1) / len(permutations), i, j)
+
 
     intersection_data = np.zeros((nb_classes, nb_classes), dtype=np.float32)
     for k, (i, j) in enumerate(permutations):

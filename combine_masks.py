@@ -3,7 +3,7 @@ import logging
 
 import numpy as np
 
-from config import IMAGES_PREDICTION_MASK_DIR
+from config import IMAGES_PREDICTION_MASK_DIR, IMAGES_TEST_REAL
 from utils.data import get_train_test_images_ids, load_prediction_mask, save_prediction_mask
 from utils.matplotlib import matplotlib_setup
 
@@ -24,7 +24,7 @@ def main(model_names, output_name):
     images_all, images_train, images_test = get_train_test_images_ids()
     logging.info('Train: %s, test: %s, all: %s', len(images_train), len(images_test), len(images_all))
 
-    target_images = images_test
+    target_images = IMAGES_TEST_REAL
     logging.info('Target images: %s', len(target_images))
     for img_number, img_id in enumerate(target_images):
         # if img_id != '6060_2_3':
@@ -43,9 +43,9 @@ def main(model_names, output_name):
 
 if __name__ == '__main__':
     model_names = [
-        'softmax_pansharpen_tiramisu_big_objects',
-        'softmax_pansharpen_tiramisu_small_objects',
+        'softmax_pansharpen_vgg_for_ws_big_objects',
+        'softmax_pansharpen_vgg_for_ws_small_objects',
     ]
-    output_name = 'softmax_pansharpen_tiramisu'
+    output_name = 'softmax_pansharpen_vgg_for_ws'
 
     main(model_names, output_name)

@@ -142,5 +142,5 @@ def main(model_name):
 
 
 if __name__ == '__main__':
-    model_name = 'softmax_pansharpen_tiramisu'
+    model_name = 'softmax_pansharpen_vgg_for_ws'
     main(model_name)
